@@ -1,5 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE
-from __future__ import print_function, division
 
 from .import_modules import *
 from . import Grid, Misc, Series

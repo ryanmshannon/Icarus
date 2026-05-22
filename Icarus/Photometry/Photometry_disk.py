@@ -1,5 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE
-from __future__ import print_function, division
 
 __all__ = ["Photometry_disk"]
 
@@ -309,7 +308,7 @@ class Photometry_disk(object):
             for d in disk:
                 disk_str += str(d) + ", "
             disk_str = disk_str[:-2]
-            for i in xrange(self.ndataset):
+            for i in range(self.ndataset):
                 print( "chi2 (%i): %f,   d.o.f.: %i,   avg. companion flux: %.4e,   comp. flux/tot. flux: %.4f,   max. companion flux: %.4e,   max. comp. flux/tot. flux: %.4f,   avg. error: %.4f" %(i, chi2[i], self.data['mag'][i].size, pred_flux[i].mean(), pred_flux[i].mean()/(pred_flux[i].mean()+disk[i]), pred_flux[i].max(), pred_flux[i].max()/(pred_flux[i].max()+disk[i]), self.data['mag_err'][i].mean()) )
             print( "chi2: " + str(chi2.sum()) + ", chi2DM: " + str(chi2DM) + ", chi2AV: " + str(chi2AV) + ", chi2Keff: " + str(chi2Keff) + "\n    Keff: " + str(pred_Keff) + ", disk: " + disk_str )
 
@@ -429,14 +428,14 @@ class Photometry_disk(object):
                     disk = par[9+i] + disk_slope[i]*phases[i]
                 else:
                     disk = np.ones(len(phases[i]))*par[9+i]
-                flux.append(np.array([self.star.Mag_flux_disk(phases[i][n], atmo_grid=self.atmo_grid[i], disk=disk[n]) for n in xrange(len(phases[i]))]) + self.atmo_grid[i].ext*par[8] + par[7])
+                flux.append(np.array([self.star.Mag_flux_disk(phases[i][n], atmo_grid=self.atmo_grid[i], disk=disk[n]) for n in range(len(phases[i]))]) + self.atmo_grid[i].ext*par[8] + par[7])
         else:
             for i in np.arange(self.ndataset):
                 if disk_slope is not None:
                     disk = par[9] + disk_slope*phases[i]
                 else:
                     disk = np.ones(len(phases[i]))*par[9]
-                flux.append(np.array([self.star.Mag_flux_disk(phases[i][n], atmo_grid=self.atmo_grid[i], disk=disk[n]) for n in xrange(len(phases[i]))]) + self.atmo_grid[i].ext*par[8] + par[7])
+                flux.append(np.array([self.star.Mag_flux_disk(phases[i][n], atmo_grid=self.atmo_grid[i], disk=disk[n]) for n in range(len(phases[i]))]) + self.atmo_grid[i].ext*par[8] + par[7])
         return flux
 
     def Get_Keff(self, par, nphases=20, dataset=0, func_par=None, make_surface=False, verbose=False):

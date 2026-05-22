@@ -1,5 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE
-from __future__ import print_function, division
 
 from .import_modules import *
 
@@ -62,8 +61,8 @@ def Composition(alm,phi,theta):
     n = len(alm)
     lmax = np.sqrt(n).astype(int) - 1 # n = (lmax+1)**2
     f = 0.
-    for l in xrange(lmax+1):
-        for m in xrange(-l,l+1):
+    for l in range(lmax+1):
+        for m in range(-l,l+1):
             f += alm.pop() * Ylmr(l,m,phi,theta)
     return f
 
@@ -87,8 +86,8 @@ def Decomposition(lmax,phi,theta,f,ndigit=None,norm=False):
     >>> alm = Decomposition(lmax,phi,theta,f)
     """
     alm = []
-    for l in xrange(lmax+1):
-        for m in xrange(-l,l+1):
+    for l in range(lmax+1):
+        for m in range(-l,l+1):
             alm.append(Almr(l,m,phi,theta,f))
     alm = np.array(alm)
     if ndigit is not None:
@@ -118,7 +117,7 @@ def Legendre_assoc(l,m,x):
     pmmp1 = x*pmm*np.sqrt(2*m+1)
     if l == m+1:
         return pmmp1
-    for ll in xrange(m+2,l+1):
+    for ll in range(m+2,l+1):
         pll = (x*(2*ll-1)*pmmp1 - np.sqrt((ll-1)**2 - m**2)*pmm)/np.sqrt(ll**2-m**2)
         pmm = pmmp1
         pmmp1 = pll
@@ -161,22 +160,22 @@ def Pretty_print_alm(alm, format=2):
     f = ''
     if format == 1:
         alm = list(alm[::-1]) # making the alm a list will be easier and reversing so that the first element pops first
-        for l in xrange(lmax+1):
-            for m in xrange(-l,l+1):
+        for l in range(lmax+1):
+            for m in range(-l,l+1):
                 f += 'l=%i,m=%s: %f ' %(l,m,alm.pop())
             f += '\n'
         print(f)
     elif format == 2:
         alm = list(alm[::-1]) # making the alm a list will be easier and reversing so that the first element pops first
         data = np.empty((lmax+1,lmax+1), dtype=float)
-        for l in xrange(lmax+1):
-            for m in xrange(-l,l+1):
+        for l in range(lmax+1):
+            for m in range(-l,l+1):
                 if m < 0:
                     data[l,l+m] = alm.pop()
                 else:
                     data[l-m,l] = alm.pop()
-        for l in xrange(lmax+1):
-            for m in xrange(lmax+1):
+        for l in range(lmax+1):
+            for m in range(lmax+1):
                 tmp = data[l,m]
                 f += '% 4.4e | ' %(tmp)
             f = f[:-3]
@@ -189,7 +188,7 @@ def Xfact(m):
     Computes (2m-1)!!/sqrt((2m)!)
     """
     res = 1.
-    for i in xrange(1,2*m+1):
+    for i in range(1,2*m+1):
         if i % 2: res *= i # (2m-1)!!
         res /= np.sqrt(i) # sqrt((2m)!)
     return res

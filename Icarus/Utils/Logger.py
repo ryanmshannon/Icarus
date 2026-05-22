@@ -1,5 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE
-from __future__ import print_function, division
 
 import os
 import logging
@@ -17,7 +16,7 @@ import logging
 #LEVEL = 'DEBUG'
 LEVEL = 20
 
-for i in xrange(5,9):
+for i in range(5,9):
     logging.addLevelName(i, "DEBUG{}".format(i))
 
 if False:

@@ -1,5 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE
-from __future__ import print_function, division
 
 __all__ = ["Atmo_grid_BTSettl7"]
 
@@ -52,7 +51,7 @@ class Atmo_phot_BTSettl7(Atmo_grid):
 
         # Trim the atmosphere grid to keep only the elements within the logg subset
         inds = np.zeros(temp.size, dtype=bool)
-        for i in xrange(grid_logg.size):
+        for i in range(grid_logg.size):
             inds += logg == grid_logg[i]
 
         temp = temp[inds]
