@@ -6,10 +6,10 @@ import os
 import sys
 from copy import deepcopy
 
+from collections import OrderedDict
+
 from astropy.table import TableColumns, Column, MaskedColumn, Table
 from astropy.utils.metadata import MetaData
-from astropy.utils import OrderedDict
-from astropy.extern import six
 
 from ..Utils.import_modules import *
 from .. import Utils
@@ -106,7 +106,7 @@ class AtmoGrid(Column):
         return self.copy(copy_data=True)
 
     def __getitem__(self, item):
-        if isinstance(item, six.string_types):
+        if isinstance(item, str):
             if item not in self.colnames:
                 if 'log'+item in self.colnames:
                     return np.exp(self.cols['log'+item])
