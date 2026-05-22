@@ -1,5 +1,4 @@
-from __future__ import print_function
-from distutils.core import setup
+from setuptools import setup
 from setuptools import find_packages
 
 
@@ -11,7 +10,7 @@ setup(
     # description
     description=('Icarus is a stellar binary light curve synthesis tool '
                  'initially developed by Rene Breton'),
-    long_description=open('README.md').read(),
+    long_description=open('README.md', encoding='utf-8').read(),
 
     # The project's main homepage.
     url='https://github.com/bretonr/Icarus',
@@ -41,12 +40,14 @@ setup(
         'License :: OSI Approved :: BSD License',
 
         # python versions this library supports
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.7',
-        #'Programming Language :: Python :: 3',
-        #'Programming Language :: Python :: 3.3',
-        #'Programming Language :: Python :: 3.4',
-        #'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
 
     keywords=['astrophysics','cosmology', 'photometry', 'binary', 'modeling',
@@ -58,6 +59,8 @@ setup(
 
     # as stated on https://github.com/bretonr/Icarus
     install_requires=['numpy', 'scipy', 'astropy'],
+
+    python_requires='>=3.6',
 
 
     # including the geodesic data files.
