@@ -44,16 +44,16 @@ atmo_fln = 'atmo_models_J2241-5236.txt'
 ndiv = 5
 
 
-##### Pulsar timing solution (Keith et al. 2011).
-porb = 3.5 * 3600.                     # orbital period, in seconds
-asini = 9.2e-4                         # pulsar projected semi-major axis, in light-seconds
+##### Pulsar timing solution (Reardon et al. 2021).
+porb = 0.145672*86400                    # orbital period, in seconds
+asini = 25.7e-3                        # pulsar projected semi-major axis, in light-seconds
 
 
 ##### Companion/system parameters (Kandel, Romani & An 2019).
-incl = 55. * cts.degree                # orbital inclination
-M_ns = 2.5                             # neutron star (pulsar) mass, in Msun
+incl = 49.7 * cts.degree                # orbital inclination
+M_ns = 1.5                             # neutron star (pulsar) mass, in Msun
 corotation = 1.                        # tidally-locked companion
-filling = 0.95                         # nearly Roche-lobe-filling companion
+filling = 0.66                         # nearly Roche-lobe-filling companion
 gravdark = 0.08                        # gravity darkening coefficient (convective envelope)
 Tnight = 3000.                         # unheated (night-side) base temperature, in K
 Tday = 10000.                          # approximate irradiated (day-side) temperature, in K
