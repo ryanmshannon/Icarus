@@ -23,35 +23,51 @@ logger = logging.getLogger(__name__)
 ##----- ----- ----- ----- ----- ----- ----- ----- ----- -----##
 
 
+def _Trilinear(grid, jx, jy, jz, wx, wy, wz):
+    """
+    Shared vectorized trilinear interpolation helper used by several
+    Interp_* functions below, replacing what used to be repeated
+    weave.inline C blocks (scipy.weave is no longer available).
+
+    grid: ndarray with the interpolated axes as its first three dimensions
+        (may have further dimensions, e.g. wavelength, which are broadcast
+        over).
+    jx, jy, jz: ndarray of lower-bound integer indices along each axis.
+    wx, wy, wz: ndarray of fractional weights along each axis (weight of
+        the upper-bound point).
+    """
+    w1x, w0x = wx, 1.-wx
+    j0x, j1x = jx, jx+1
+    w1y, w0y = wy, 1.-wy
+    j0y, j1y = jy, jy+1
+    w1z, w0z = wz, 1.-wz
+    j0z, j1z = jz, jz+1
+    return w1z*(w0y*(w0x*grid[j0x,j0y,j1z] + w1x*grid[j1x,j0y,j1z])
+               + w1y*(w0x*grid[j0x,j1y,j1z] + w1x*grid[j1x,j1y,j1z])) \
+         + w0z*(w0y*(w0x*grid[j0x,j0y,j0z] + w1x*grid[j1x,j0y,j0z])
+               + w1y*(w0x*grid[j0x,j1y,j0z] + w1x*grid[j1x,j1y,j0z]))
+
+def _Trilinear_at_wav(grid, jx, jy, jz, wx, wy, wz, jw):
+    """
+    Same as _Trilinear, but also selects along a 4th (wavelength) axis at
+    integer index array jw (exact, not interpolated -- callers blend two
+    calls at neighbouring wavelength indices themselves). jw may carry
+    extra broadcast dimensions beyond jx/jy/jz (e.g. jw of shape
+    (nsurf,nwav) vs jx of shape (nsurf,1), broadcasting to (nsurf,nwav)).
+    """
+    w1x, w0x = wx, 1.-wx
+    j0x, j1x = jx, jx+1
+    w1y, w0y = wy, 1.-wy
+    j0y, j1y = jy, jy+1
+    w1z, w0z = wz, 1.-wz
+    j0z, j1z = jz, jz+1
+    return w1z*(w0y*(w0x*grid[j0x,j0y,j1z,jw] + w1x*grid[j1x,j0y,j1z,jw])
+               + w1y*(w0x*grid[j0x,j1y,j1z,jw] + w1x*grid[j1x,j1y,j1z,jw])) \
+         + w0z*(w0y*(w0x*grid[j0x,j0y,j0z,jw] + w1x*grid[j1x,j0y,j0z,jw])
+               + w1y*(w0x*grid[j0x,j1y,j0z,jw] + w1x*grid[j1x,j1y,j0z,jw]))
+
 def Interp_3Dgrid(grid, wx, wy, wz, jx, jy, jz):
     """
-    """
-    code = """
-    #pragma omp parallel shared(grid,wx,wy,wz,jx,jy,jz,area,val_z,nsurf,interp_val) default(none)
-    {
-    double w1x, w0x, w1y, w0y, w1z, w0z, tmp_interp_val;
-    int j0x, j1x, j0y, j1y, j0z, j1z;
-    #pragma omp for reduction(+:fl)
-    for (int i=0; i<nsurf; i++) {
-        w1x = wx(i);
-        w0x = 1.-w1x;
-        j0x = jx(i);
-        j1x = 1.+j0x;
-        w1y = wy(i);
-        w0y = 1.-w1y;
-        j0y = jy(i);
-        j1y = 1.+j0y;
-        w1z = wz(i);
-        w0z = 1.-w1z;
-        j0z = jz(i);
-        j1z = 1.+j0z;
-        tmp_interp_val = w1z*(w0y*(w0x*grid(j0x,j0y,j1z) + w1x*grid(j1x,j0y,j1z)) \
-                      + w1y*(w0x*grid(j0x,j1y,j1z) + w1x*grid(j1x,j1y,j1z))) \
-                + w0z*(w0y*(w0x*grid(j0x,j0y,j0z) + w1x*grid(j1x,j0y,j0z)) \
-                      + w1y*(w0x*grid(j0x,j1y,j0z) + w1x*grid(j1x,j1y,j0z)));
-        interp_val(i) = tmp_interp_val;
-    }
-    }
     """
     grid = np.ascontiguousarray(grid, dtype=float)
     wx = np.ascontiguousarray(wx, dtype=float)
@@ -60,17 +76,9 @@ def Interp_3Dgrid(grid, wx, wy, wz, jx, jy, jz):
     jx = np.ascontiguousarray(jx, dtype=int)
     jy = np.ascontiguousarray(jy, dtype=int)
     jz = np.ascontiguousarray(jz, dtype=int)
-    nsurf = jx.size
-    interp_val = np.zeros(nsurf, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_vals = weave.inline(code, ['grid', 'wx', 'wy', 'wz', 'jx', 'jy', 'jz', 'nsurf', 'interp_val'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_vals
-    return interp_val
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available).
+    return _Trilinear(grid, jx, jy, jz, wx, wy, wz)
 
 def Interp_photometry(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu):
     """
@@ -136,18 +144,8 @@ def Interp_photometry(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu):
     area = np.ascontiguousarray(area, dtype=float)
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
     ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
-    ## is no longer available). Vectorized trilinear interpolation over the
-    ## (logtemp, logg, mu) grid, identical to the C code it replaces.
-    w1teff, w0teff = wteff, 1.-wteff
-    j0teff, j1teff = jteff, jteff+1
-    w1logg, w0logg = wlogg, 1.-wlogg
-    j0logg, j1logg = jlogg, jlogg+1
-    w1mu, w0mu = wmu, 1.-wmu
-    j0mu, j1mu = jmu, jmu+1
-    tmp_fl = w1mu*(w0logg*(w0teff*grid[j0teff,j0logg,j1mu] + w1teff*grid[j1teff,j0logg,j1mu])
-                  + w1logg*(w0teff*grid[j0teff,j1logg,j1mu] + w1teff*grid[j1teff,j1logg,j1mu])) \
-           + w0mu*(w0logg*(w0teff*grid[j0teff,j0logg,j0mu] + w1teff*grid[j1teff,j0logg,j0mu])
-                  + w1logg*(w0teff*grid[j0teff,j1logg,j0mu] + w1teff*grid[j1teff,j1logg,j0mu]))
+    ## is no longer available).
+    tmp_fl = _Trilinear(grid, jteff, jlogg, jmu, wteff, wlogg, wmu)
     fl = float(np.sum(np.exp(tmp_fl) * area * val_mu))
     return fl
 
@@ -180,39 +178,6 @@ def Interp_photometry_doppler(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, 
     flux : scalar
         Flux integrated over the surface, with Doppler boosting.
     """
-    code = """
-    double fl = 0.;
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,area,val_mu,nsurf,val_vel,grid_doppler,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, tmp_fl, tmp_doppler;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu;
-    #pragma omp for reduction(+:fl)
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1.+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1.+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1.+j0mu;
-        tmp_fl = w1mu*(w0logg*(w0teff*grid(j0teff,j0logg,j1mu) + w1teff*grid(j1teff,j0logg,j1mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j1mu) + w1teff*grid(j1teff,j1logg,j1mu))) \
-                + w0mu*(w0logg*(w0teff*grid(j0teff,j0logg,j0mu) + w1teff*grid(j1teff,j0logg,j0mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j0mu) + w1teff*grid(j1teff,j1logg,j0mu)));
-        tmp_doppler = w1mu*(w0logg*(w0teff*grid_doppler(j0teff,j0logg,j1mu) + w1teff*grid_doppler(j1teff,j0logg,j1mu)) \
-                      + w1logg*(w0teff*grid_doppler(j0teff,j1logg,j1mu) + w1teff*grid_doppler(j1teff,j1logg,j1mu))) \
-                + w0mu*(w0logg*(w0teff*grid_doppler(j0teff,j0logg,j0mu) + w1teff*grid_doppler(j1teff,j0logg,j0mu)) \
-                      + w1logg*(w0teff*grid_doppler(j0teff,j1logg,j0mu) + w1teff*grid_doppler(j1teff,j1logg,j0mu)));
-        fl = fl + exp(tmp_fl) * area(i) * val_mu(i) * (1 + tmp_doppler * val_vel(i));
-    }
-    }
-    return_val = fl;
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -224,15 +189,11 @@ def Interp_photometry_doppler(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, 
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
     grid_doppler = np.ascontiguousarray(grid_doppler, dtype=float)
     val_vel = np.ascontiguousarray(val_vel, dtype=float)
-    nsurf = jteff.size
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'nsurf', 'val_vel', 'grid_doppler'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    fl = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available).
+    tmp_fl = _Trilinear(grid, jteff, jlogg, jmu, wteff, wlogg, wmu)
+    tmp_doppler = _Trilinear(grid_doppler, jteff, jlogg, jmu, wteff, wlogg, wmu)
+    fl = float(np.sum(np.exp(tmp_fl) * area * val_mu * (1 + tmp_doppler * val_vel)))
     return fl
 
 def Interp_photometry_doppler_nosum(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu, val_vel, grid_doppler):
@@ -267,37 +228,6 @@ def Interp_photometry_doppler_nosum(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, 
     flux : ndarray
         Flux _not_ integrated over the surface.
     """
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,area,val_mu,nsurf,val_vel,grid_doppler,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, tmp_fl, tmp_doppler;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu;
-    #pragma omp for
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1.+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1.+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1.+j0mu;
-        tmp_fl = w1mu*(w0logg*(w0teff*grid(j0teff,j0logg,j1mu) + w1teff*grid(j1teff,j0logg,j1mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j1mu) + w1teff*grid(j1teff,j1logg,j1mu))) \
-                + w0mu*(w0logg*(w0teff*grid(j0teff,j0logg,j0mu) + w1teff*grid(j1teff,j0logg,j0mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j0mu) + w1teff*grid(j1teff,j1logg,j0mu)));
-        tmp_doppler = w1mu*(w0logg*(w0teff*grid_doppler(j0teff,j0logg,j1mu) + w1teff*grid_doppler(j1teff,j0logg,j1mu)) \
-                      + w1logg*(w0teff*grid_doppler(j0teff,j1logg,j1mu) + w1teff*grid_doppler(j1teff,j1logg,j1mu))) \
-                + w0mu*(w0logg*(w0teff*grid_doppler(j0teff,j0logg,j0mu) + w1teff*grid_doppler(j1teff,j0logg,j0mu)) \
-                      + w1logg*(w0teff*grid_doppler(j0teff,j1logg,j0mu) + w1teff*grid_doppler(j1teff,j1logg,j0mu)));
-        fl(i) = exp(tmp_fl) * area(i) * val_mu(i) * (1 + tmp_doppler * val_vel(i));
-    }
-    }
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -309,16 +239,11 @@ def Interp_photometry_doppler_nosum(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, 
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
     grid_doppler = np.ascontiguousarray(grid_doppler, dtype=float)
     val_vel = np.ascontiguousarray(val_vel, dtype=float)
-    nsurf = jteff.size
-    fl = np.zeros(nsurf, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'nsurf', 'val_vel', 'grid_doppler', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available).
+    tmp_fl = _Trilinear(grid, jteff, jlogg, jmu, wteff, wlogg, wmu)
+    tmp_doppler = _Trilinear(grid_doppler, jteff, jlogg, jmu, wteff, wlogg, wmu)
+    fl = np.exp(tmp_fl) * area * val_mu * (1 + tmp_doppler * val_vel)
     return fl
 
 def Interp_photometry_details(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu, v, val_teff):
@@ -359,49 +284,6 @@ def Interp_photometry_details(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, 
     Teff : scalar
         Flux-weighted temperature.
     """
-    code = """
-    double fl = 0.;
-    double Keff = 0.;
-    double KeffSquare = 0;
-    double Teff = 0.;
-    double vsini = 0.;
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,area,val_mu,v,val_teff,nsurf,fl,Keff,KeffSquare,Teff) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, tmp_fl;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu;
-    #pragma omp for reduction(+:fl,Keff,KeffSquare,Teff)
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1.+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1.+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1.+j0mu;
-        tmp_fl = w1mu*(w0logg*(w0teff*grid(j0teff,j0logg,j1mu) + w1teff*grid(j1teff,j0logg,j1mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j1mu) + w1teff*grid(j1teff,j1logg,j1mu))) \
-                + w0mu*(w0logg*(w0teff*grid(j0teff,j0logg,j0mu) + w1teff*grid(j1teff,j0logg,j0mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j0mu) + w1teff*grid(j1teff,j1logg,j0mu)));
-        tmp_fl = exp(tmp_fl) * area(i) * val_mu(i);
-        fl = fl + tmp_fl;
-        Keff = Keff + v(i) * tmp_fl;
-        KeffSquare = KeffSquare + v(i)*v(i) * tmp_fl;
-        Teff = Teff + exp(val_teff(i)) * tmp_fl;
-    }
-    }
-    Keff = Keff/fl;
-    Teff = Teff/fl;
-    vsini = sqrt((KeffSquare/fl) - Keff*Keff);
-    results(0) = fl;
-    results(1) = Keff;
-    results(2) = vsini;
-    results(3) = Teff;
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -413,17 +295,14 @@ def Interp_photometry_details(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, 
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
     v = np.ascontiguousarray(v, dtype=float)
     val_teff = np.ascontiguousarray(val_teff, dtype=float)
-    nsurf = jteff.size
-    results = np.zeros(4, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'v', 'val_teff', 'nsurf', 'results'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
-    fl, Keff, vsini, Teff = results
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available).
+    tmp_fl = np.exp(_Trilinear(grid, jteff, jlogg, jmu, wteff, wlogg, wmu)) * area * val_mu
+    fl = float(np.sum(tmp_fl))
+    Keff = float(np.sum(v * tmp_fl)) / fl
+    KeffSquare = float(np.sum(v*v * tmp_fl))
+    Teff = float(np.sum(np.exp(val_teff) * tmp_fl)) / fl
+    vsini = float(np.sqrt((KeffSquare/fl) - Keff*Keff))
     return fl, Keff, vsini, Teff
 
 def Interp_photometry_Keff(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu, v):
@@ -457,39 +336,6 @@ def Interp_photometry_Keff(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val
     Keff : scalar
         Flux-weighted radial velocity.
     """
-    code = """
-    double fl = 0.;
-    double Keff = 0.;
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,area,val_mu,v,nsurf,fl,Keff) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, tmp_fl;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu;
-    #pragma omp for reduction(+:fl,Keff)
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1.+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1.+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1.+j0mu;
-        tmp_fl = w1mu*(w0logg*(w0teff*grid(j0teff,j0logg,j1mu) + w1teff*grid(j1teff,j0logg,j1mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j1mu) + w1teff*grid(j1teff,j1logg,j1mu))) \
-                + w0mu*(w0logg*(w0teff*grid(j0teff,j0logg,j0mu) + w1teff*grid(j1teff,j0logg,j0mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j0mu) + w1teff*grid(j1teff,j1logg,j0mu)));
-        fl = fl + exp(tmp_fl) * area(i) * val_mu(i);
-        Keff = Keff + v(i) * exp(tmp_fl) * area(i) * val_mu(i);
-    }
-    }
-    Keff = Keff/fl;
-    results(0) = fl;
-    results(1) = Keff;
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -500,17 +346,11 @@ def Interp_photometry_Keff(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val
     area = np.ascontiguousarray(area, dtype=float)
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
     v = np.ascontiguousarray(v, dtype=float)
-    nsurf = jteff.size
-    results = np.zeros(2, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'v', 'nsurf', 'results'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
-    fl, Keff = results
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available).
+    tmp_fl = np.exp(_Trilinear(grid, jteff, jlogg, jmu, wteff, wlogg, wmu)) * area * val_mu
+    fl = float(np.sum(tmp_fl))
+    Keff = float(np.sum(v * tmp_fl)) / fl
     return fl, Keff
 
 def Interp_photometry_nosum(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu):
@@ -539,33 +379,6 @@ def Interp_photometry_nosum(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, va
     flux : ndarray
         Flux _not_ integrated over the surface.
     """
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,area,val_mu,nsurf,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, tmp_fl;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu;
-    #pragma omp for
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1.+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1.+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1.+j0mu;
-        tmp_fl = w1mu*(w0logg*(w0teff*grid(j0teff,j0logg,j1mu) + w1teff*grid(j1teff,j0logg,j1mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j1mu) + w1teff*grid(j1teff,j1logg,j1mu))) \
-                + w0mu*(w0logg*(w0teff*grid(j0teff,j0logg,j0mu) + w1teff*grid(j1teff,j0logg,j0mu)) \
-                      + w1logg*(w0teff*grid(j0teff,j1logg,j0mu) + w1teff*grid(j1teff,j1logg,j0mu)));
-        fl(i) = exp(tmp_fl) * area(i) * val_mu(i);
-    }
-    }
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -575,16 +388,9 @@ def Interp_photometry_nosum(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, va
     jmu = np.ascontiguousarray(jmu, dtype=int)
     area = np.ascontiguousarray(area, dtype=float)
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
-    nsurf = jteff.size
-    fl = np.zeros(nsurf, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'nsurf', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available).
+    fl = np.exp(_Trilinear(grid, jteff, jlogg, jmu, wteff, wlogg, wmu)) * area * val_mu
     return fl
 
 def Interp_doppler(grid, wteff, wlogg, wmu, wwav, jteff, jlogg, jmu, jwav, area, val_mu):
@@ -619,81 +425,6 @@ def Interp_doppler(grid, wteff, wlogg, wmu, wwav, jteff, jlogg, jmu, jwav, area,
         Spectrum integrated over the surface.
     """
     logger.log(9, "start")
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,wwav,jteff,jlogg,jmu,jwav,area,val_mu,nsurf,nwav,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, w1wav, w0wav, tmp_fl;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu, j0wav, j1wav, j0wavk, j1wavk;
-    #pragma omp for
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1.+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1.+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1.+j0mu;
-        w1wav = wwav(i);
-        w0wav = 1.-w1wav;
-        j0wav = jwav(i);
-        j1wav = 1.+j0wav;
-        //w0wav *= area(i) * val_mu(i);
-        //w1wav *= area(i) * val_mu(i);
-        for (int k=0; k<nwav; k++) {
-            j0wavk = j0wav+k;
-            j1wavk = j1wav+k;
-            if (j0wavk < 0){
-                j0wavk = 0;
-                j1wavk = 0;
-            } else if (j1wavk >= nwav){
-                j0wavk = nwav-1;
-                j1wavk = nwav-1;
-            }
-            tmp_fl = \
-                ( w1mu * \
-                    ( w0wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j1mu,j0wavk) + w1teff * grid(j1teff,j0logg,j1mu,j0wavk) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j1mu,j0wavk) + w1teff * grid(j1teff,j1logg,j1mu,j0wavk) ) \
-                        ) \
-                    + w1wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j1mu,j1wavk) + w1teff * grid(j1teff,j0logg,j1mu,j1wavk) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j1mu,j1wavk) + w1teff * grid(j1teff,j1logg,j1mu,j1wavk) ) \
-                        ) \
-                    ) \
-                + w0mu * \
-                    ( w0wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j0mu,j0wavk) + w1teff * grid(j1teff,j0logg,j0mu,j0wavk) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j0mu,j0wavk) + w1teff * grid(j1teff,j1logg,j0mu,j0wavk) ) \
-                        ) \
-                    + w1wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j0mu,j1wavk) + w1teff * grid(j1teff,j0logg,j0mu,j1wavk) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j0mu,j1wavk) + w1teff * grid(j1teff,j1logg,j0mu,j1wavk) ) \
-                        ) \
-                    ) \
-                );
-            //std::cout << "tmp_fl " << tmp_fl << std::endl;
-            //std::cout << "area*val_mu " << area(i) * val_mu(i) << std::endl;
-            //std::cout << "fl " << tmp_fl * area(i) * val_mu(i) << std::endl;
-            //fl(k) += tmp_fl * area(i) * val_mu(i);
-            fl(k) += exp(tmp_fl) * area(i) * val_mu(i);
-                //);
-        }
-    }
-    }
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -708,14 +439,33 @@ def Interp_doppler(grid, wteff, wlogg, wmu, wwav, jteff, jlogg, jmu, jwav, area,
     nsurf = jteff.size
     nwav = grid.shape[-1]
     fl = np.zeros(nwav, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'wwav', 'jteff', 'jlogg', 'jmu', 'jwav', 'area', 'val_mu', 'nsurf', 'nwav', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). For each surface element, the local
+    ## spectrum is quadrilinearly interpolated (via _Trilinear_at_wav, at
+    ## the two neighbouring wavelength indices j0wavk/j1wavk that its
+    ## Doppler shift maps each output pixel k to) and blended, then
+    ## accumulated onto the output wavelength grid. Processed in chunks of
+    ## surface elements to bound the (nsurf_chunk x nwav) intermediate
+    ## arrays' memory footprint.
+    kk = np.arange(nwav)
+    chunk = max(1, 20_000_000 // max(nwav,1))
+    for start in range(0, nsurf, chunk):
+        sl = slice(start, start+chunk)
+        jteff_c = jteff[sl,None]; wteff_c = wteff[sl,None]
+        jlogg_c = jlogg[sl,None]; wlogg_c = wlogg[sl,None]
+        jmu_c = jmu[sl,None]; wmu_c = wmu[sl,None]
+        w1wav_c = wwav[sl,None]; w0wav_c = 1.-w1wav_c
+        j0wavk = jwav[sl,None] + kk[None,:]
+        j1wavk = j0wavk+1
+        mask_low = j0wavk < 0
+        mask_high = j1wavk >= nwav
+        j0wavk = np.where(mask_low, 0, np.where(mask_high, nwav-1, j0wavk))
+        j1wavk = np.where(mask_low, 0, np.where(mask_high, nwav-1, j1wavk))
+        val0 = _Trilinear_at_wav(grid, jteff_c, jlogg_c, jmu_c, wteff_c, wlogg_c, wmu_c, j0wavk)
+        val1 = _Trilinear_at_wav(grid, jteff_c, jlogg_c, jmu_c, wteff_c, wlogg_c, wmu_c, j1wavk)
+        tmp_fl = w0wav_c*val0 + w1wav_c*val1
+        contrib = np.exp(tmp_fl) * (area[sl]*val_mu[sl])[:,None]
+        fl += contrib.sum(axis=0)
     logger.log(9, "end")
     return fl
 
@@ -758,57 +508,6 @@ def Interp_doppler_savememory(grid, wteff, wlogg, wmu, wwav, jteff, jlogg, jmu, 
     NOTE: This is becoming obsolete.
     """
     logger.log(9, "start")
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,wwav,jteff,jlogg,jmu,jwav,mu_grid,area,val_mu,nsurf,nwav,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, w1wav, w0wav, tmp_fl;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu, j0wav, j1wav, j0wavk, j1wavk;
-    #pragma omp for
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1+j0mu;
-        w1wav = wwav(i);
-        w0wav = 1.-w1wav;
-        j0wav = jwav(i);
-        j1wav = 1+j0wav;
-        for (int k=0; k<nwav; k++) {
-            j0wavk = j0wav+k;
-            j1wavk = j1wav+k;
-            if (j0wavk < 0){
-                j0wavk = 0;
-                j1wavk = 0;
-            } else if (j1wavk >= nwav){
-                j0wavk = nwav-1;
-                j1wavk = nwav-1;
-            }
-            tmp_fl = \
-                ( \
-                    w0wav * ( w0mu * mu_grid(j0mu,j0wavk) + w1mu * mu_grid(j1mu,j0wavk) ) * \
-                        exp( \
-                        w0logg * ( w0teff * grid(j0teff,j0logg,j0wavk) + w1teff * grid(j1teff,j0logg,j0wavk) ) + \
-                        w1logg * ( w0teff * grid(j0teff,j1logg,j0wavk) + w1teff * grid(j1teff,j1logg,j0wavk) ) \
-                        ) + \
-                    w1wav * ( w0mu * mu_grid(j0mu,j1wavk) + w1mu * mu_grid(j1mu,j1wavk) ) * \
-                        exp( \
-                        w0logg * ( w0teff * grid(j0teff,j0logg,j1wavk) + w1teff * grid(j1teff,j0logg,j1wavk) ) + \
-                        w1logg * ( w0teff * grid(j0teff,j1logg,j1wavk) + w1teff * grid(j1teff,j1logg,j1wavk) ) \
-                        ) \
-                );
-            fl(k) += tmp_fl * area(i) * val_mu(i);
-        }
-    }
-    }
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -824,14 +523,37 @@ def Interp_doppler_savememory(grid, wteff, wlogg, wmu, wwav, jteff, jlogg, jmu, 
     nsurf = jteff.size
     nwav = grid.shape[-1]
     fl = np.zeros(nwav, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'wwav', 'jteff', 'jlogg', 'jmu', 'jwav','mu_grid', 'area', 'val_mu', 'nsurf', 'nwav', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Same wavelength-shift-and-blend scheme as
+    ## Interp_doppler, but here `grid` only has (logtemp, logg, wav) axes
+    ## (bilinear, not trilinear) and the limb darkening is a separate
+    ## (mu, wav) table applied multiplicatively outside the exp(). Chunked
+    ## over surface elements to bound memory.
+    kk = np.arange(nwav)
+    chunk = max(1, 20_000_000 // max(nwav,1))
+    for start in range(0, nsurf, chunk):
+        sl = slice(start, start+chunk)
+        j0teff = jteff[sl,None]; j1teff = j0teff+1
+        w1teff = wteff[sl,None]; w0teff = 1.-w1teff
+        j0logg = jlogg[sl,None]; j1logg = j0logg+1
+        w1logg = wlogg[sl,None]; w0logg = 1.-w1logg
+        j0mu = jmu[sl,None]; j1mu = j0mu+1
+        w1mu = wmu[sl,None]; w0mu = 1.-w1mu
+        w1wav = wwav[sl,None]; w0wav = 1.-w1wav
+        j0wavk = jwav[sl,None] + kk[None,:]
+        j1wavk = j0wavk+1
+        mask_low = j0wavk < 0
+        mask_high = j1wavk >= nwav
+        j0wavk = np.where(mask_low, 0, np.where(mask_high, nwav-1, j0wavk))
+        j1wavk = np.where(mask_low, 0, np.where(mask_high, nwav-1, j1wavk))
+        val0 = np.exp(w0logg*(w0teff*grid[j0teff,j0logg,j0wavk] + w1teff*grid[j1teff,j0logg,j0wavk])
+                     + w1logg*(w0teff*grid[j0teff,j1logg,j0wavk] + w1teff*grid[j1teff,j1logg,j0wavk]))
+        val1 = np.exp(w0logg*(w0teff*grid[j0teff,j0logg,j1wavk] + w1teff*grid[j1teff,j0logg,j1wavk])
+                     + w1logg*(w0teff*grid[j0teff,j1logg,j1wavk] + w1teff*grid[j1teff,j1logg,j1wavk]))
+        tmp_fl = w0wav*(w0mu*mu_grid[j0mu,j0wavk] + w1mu*mu_grid[j1mu,j0wavk])*val0 \
+               + w1wav*(w0mu*mu_grid[j0mu,j1wavk] + w1mu*mu_grid[j1mu,j1wavk])*val1
+        contrib = tmp_fl * (area[sl]*val_mu[sl])[:,None]
+        fl += contrib.sum(axis=0)
     logger.log(9, "end")
     return fl
 
@@ -877,61 +599,6 @@ def Interp_doppler_savememory_linear(grid, wteff, wlogg, wmu, jteff, jlogg, jmu,
 
     NOTE: This is becoming obsolete.
     """
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,mu_grid,area,val_mu,val_vel,z0,nsurf,nwav,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu;
-    double zplusone, kprime, w0k, w1k; // The weights on the interpolated lambda
-    int j0k, j1k; // The indices on the interpolated lambda
-    #pragma omp for
-    for (int k=0; k<nwav; k++) {
-        for (int i=0; i<nsurf; i++) {
-            // The interpolation on lambda due to the Doppler shift
-            zplusone = sqrt( (1.+val_vel(i))/(1.-val_vel(i)) );
-            kprime = zplusone*k + (zplusone-1.)/z0;
-            if (kprime >= nwav){
-                j0k = nwav-1;
-                j1k = nwav-1;
-                w1k = 1.;
-                w0k = 0.;
-            } else if (kprime < 0) {
-                j0k = 0;
-                j1k = 0;
-                w1k = 1.;
-                w0k = 0.;
-            } else {
-                j0k = int(kprime);
-                j1k = 1+j0k;
-                w1k = kprime - j0k;
-                w0k = 1.-w1k;
-            }
-            // Shortcut for the interpolation on other parameters
-            w1teff = wteff(i);
-            w0teff = 1.-w1teff;
-            j0teff = jteff(i);
-            j1teff = 1.+j0teff;
-            w1logg = wlogg(i);
-            w0logg = 1.-w1logg;
-            j0logg = jlogg(i);
-            j1logg = 1.+j0logg;
-            w1mu = wmu(i);
-            w0mu = 1.-w1mu;
-            j0mu = jmu(i);
-            j1mu = 1.+j0mu;
-            // We interpolate the grid
-            fl(k) += ( \
-                (w1mu*mu_grid(j1mu,j0k) + w0mu*mu_grid(j0mu,j0k)) * (w0k*\
-                    (w0logg*(w0teff*grid(j0teff,j0logg,j0k) + w1teff*grid(j1teff,j0logg,j0k)) + \
-                    w1logg*(w0teff*grid(j0teff,j1logg,j0k) + w1teff*grid(j1teff,j1logg,j0k)))) + \
-                (w1mu*mu_grid(j1mu,j1k) + w0mu*mu_grid(j0mu,j1k)) * (w1k*\
-                    (w0logg*(w0teff*grid(j0teff,j0logg,j1k) + w1teff*grid(j1teff,j0logg,j1k)) + \
-                    w1logg*(w0teff*grid(j0teff,j1logg,j1k) + w1teff*grid(j1teff,j1logg,j1k)))) \
-                ) * area(i) * val_mu(i);
-        }
-    }
-    }
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -941,19 +608,53 @@ def Interp_doppler_savememory_linear(grid, wteff, wlogg, wmu, jteff, jlogg, jmu,
     jmu = np.ascontiguousarray(jmu, dtype=int)
     area = np.ascontiguousarray(area, dtype=float)
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
-    wwav = np.ascontiguousarray(wwav, dtype=float)
-    jwav = np.ascontiguousarray(jwav, dtype=int)
+    val_vel = np.ascontiguousarray(val_vel, dtype=float)
+    mu_grid = np.ascontiguousarray(mu_grid, dtype=float)
     nsurf = jteff.size
     nwav = grid.shape[-1]
     fl = np.zeros(nwav, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'mu_grid', 'area', 'val_mu', 'val_vel', 'z0', 'nsurf', 'nwav', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Same structure as Interp_doppler_savememory,
+    ## but the Doppler shift is computed continuously per (surface element,
+    ## output pixel) via relativistic velocity/z0 instead of a precomputed
+    ## per-surface-element integer shift. Chunked over surface elements to
+    ## bound memory. (Note: the original weave code also referenced
+    ## `wwav`/`jwav`, which are not among this function's parameters --
+    ## dead/broken leftovers from another variant, dropped here.)
+    kk = np.arange(nwav)
+    zplusone = np.sqrt((1.+val_vel)/(1.-val_vel))
+    chunk = max(1, 20_000_000 // max(nwav,1))
+    for start in range(0, nsurf, chunk):
+        sl = slice(start, start+chunk)
+        j0teff = jteff[sl,None]; j1teff = j0teff+1
+        w1teff = wteff[sl,None]; w0teff = 1.-w1teff
+        j0logg = jlogg[sl,None]; j1logg = j0logg+1
+        w1logg = wlogg[sl,None]; w0logg = 1.-w1logg
+        j0mu = jmu[sl,None]; j1mu = j0mu+1
+        w1mu = wmu[sl,None]; w0mu = 1.-w1mu
+
+        kprime = zplusone[sl,None]*kk[None,:] + (zplusone[sl,None]-1.)/z0
+        mask_high = kprime >= nwav
+        mask_low = kprime < 0
+        j0k = np.where(mask_high, nwav-1, np.where(mask_low, 0, kprime.astype(int)))
+        ## Clip defensively: kprime in [nwav-1, nwav) lands in the "else"
+        ## branch with j0k = nwav-1, so j1k = j0k+1 would be nwav (an
+        ## out-of-bounds index) -- an edge case present in the original
+        ## C code too (relying on the fact that its weight w0k there is
+        ## near 1, making the out-of-bounds w1k contribution negligible;
+        ## clipped here since NumPy indexing does not tolerate it).
+        j1k = np.clip(np.where(mask_high, nwav-1, np.where(mask_low, 0, j0k+1)), 0, nwav-1)
+        w1k = np.where(mask_high | mask_low, 1., kprime - j0k)
+        w0k = 1. - w1k
+
+        val0 = w0logg*(w0teff*grid[j0teff,j0logg,j0k] + w1teff*grid[j1teff,j0logg,j0k]) \
+             + w1logg*(w0teff*grid[j0teff,j1logg,j0k] + w1teff*grid[j1teff,j1logg,j0k])
+        val1 = w0logg*(w0teff*grid[j0teff,j0logg,j1k] + w1teff*grid[j1teff,j0logg,j1k]) \
+             + w1logg*(w0teff*grid[j0teff,j1logg,j1k] + w1teff*grid[j1teff,j1logg,j1k])
+        tmp_fl = (w1mu*mu_grid[j1mu,j0k] + w0mu*mu_grid[j0mu,j0k]) * (w0k*val0) \
+               + (w1mu*mu_grid[j1mu,j1k] + w0mu*mu_grid[j0mu,j1k]) * (w1k*val1)
+        contrib = tmp_fl * (area[sl]*val_mu[sl])[:,None]
+        fl += contrib.sum(axis=0)
     return fl
 
 def Interp_doppler_nomu(grid, wteff, wlogg, wwav, jteff, jlogg, jwav, area, val_mu):
@@ -994,51 +695,11 @@ def Interp_doppler_nomu(grid, wteff, wlogg, wwav, jteff, jlogg, jwav, area, val_
     spectrum : ndarray
         Spectrum integrated over the surface.
     """
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wwav,jteff,jlogg,jwav,area,val_mu,nsurf,nwav,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1wav, w0wav;
-    int j0teff, j1teff, j0logg, j1logg, j0wav, j1wav, j0wavk, j1wavk;
-    #pragma omp for
-    for (int i=0; i<nsurf; i++) {
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1.+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1.+j0logg;
-        w1wav = wwav(i);
-        w0wav = 1.-w1wav;
-        j0wav = jwav(i);
-        j1wav = 1.+j0wav;
-        for (int k=0; k<nwav; k++) {
-            j0wavk = j0wav+k;
-            j1wavk = j1wav+k;
-            if (j0wavk < 0){
-                j0wavk = 0;
-                j1wavk = 0;
-            } else if (j1wavk >= nwav){
-                j0wavk = nwav-1;
-                j1wavk = nwav-1;
-            }
-            fl(k) += (w0wav*(w0logg*(w0teff*grid(j0teff,j0logg,j0wavk) + w1teff*grid(j1teff,j0logg,j0wavk)) \
-                        + w1logg*(w0teff*grid(j0teff,j1logg,j0wavk) + w1teff*grid(j1teff,j1logg,j0wavk))) \
-                    + w1wav*(w0logg*(w0teff*grid(j0teff,j0logg,j1wavk) + w1teff*grid(j1teff,j0logg,j1wavk)) \
-                        + w1logg*(w0teff*grid(j0teff,j1logg,j1wavk) + w1teff*grid(j1teff,j1logg,j1wavk)))) * area(i) * val_mu(i);
-            /*fl(i,k) = pow(10,fl(i,k));*/
-        }
-    }
-    }
-    """
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
-    wmu = np.ascontiguousarray(wmu, dtype=float)
     jteff = np.ascontiguousarray(jteff, dtype=int)
     jlogg = np.ascontiguousarray(jlogg, dtype=int)
-    jmu = np.ascontiguousarray(jmu, dtype=int)
     area = np.ascontiguousarray(area, dtype=float)
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
     wwav = np.ascontiguousarray(wwav, dtype=float)
@@ -1046,14 +707,36 @@ def Interp_doppler_nomu(grid, wteff, wlogg, wwav, jteff, jlogg, jwav, area, val_
     nsurf = jteff.size
     nwav = grid.shape[-1]
     fl = np.zeros(nwav, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wwav', 'jteff', 'jlogg', 'jwav', 'area', 'val_mu', 'nsurf', 'nwav', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Same wavelength-shift-and-blend scheme as
+    ## Interp_doppler, but bilinear over (logtemp, logg) only, with no mu
+    ## dependence and no exp() (linear, not log-flux). Chunked over surface
+    ## elements to bound memory. (Note: the original weave code also
+    ## referenced `wmu`/`jmu`, which are not among this function's
+    ## parameters -- dead/broken leftovers from another variant, dropped
+    ## here.)
+    kk = np.arange(nwav)
+    chunk = max(1, 20_000_000 // max(nwav,1))
+    for start in range(0, nsurf, chunk):
+        sl = slice(start, start+chunk)
+        j0teff = jteff[sl,None]; j1teff = j0teff+1
+        w1teff = wteff[sl,None]; w0teff = 1.-w1teff
+        j0logg = jlogg[sl,None]; j1logg = j0logg+1
+        w1logg = wlogg[sl,None]; w0logg = 1.-w1logg
+        w1wav = wwav[sl,None]; w0wav = 1.-w1wav
+        j0wavk = jwav[sl,None] + kk[None,:]
+        j1wavk = j0wavk+1
+        mask_low = j0wavk < 0
+        mask_high = j1wavk >= nwav
+        j0wavk = np.where(mask_low, 0, np.where(mask_high, nwav-1, j0wavk))
+        j1wavk = np.where(mask_low, 0, np.where(mask_high, nwav-1, j1wavk))
+        val0 = w0logg*(w0teff*grid[j0teff,j0logg,j0wavk] + w1teff*grid[j1teff,j0logg,j0wavk]) \
+             + w1logg*(w0teff*grid[j0teff,j1logg,j0wavk] + w1teff*grid[j1teff,j1logg,j0wavk])
+        val1 = w0logg*(w0teff*grid[j0teff,j0logg,j1wavk] + w1teff*grid[j1teff,j0logg,j1wavk]) \
+             + w1logg*(w0teff*grid[j0teff,j1logg,j1wavk] + w1teff*grid[j1teff,j1logg,j1wavk])
+        tmp_fl = w0wav*val0 + w1wav*val1
+        contrib = tmp_fl * (area[sl]*val_mu[sl])[:,None]
+        fl += contrib.sum(axis=0)
     return fl
 
 def Interp_spectroscopy(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu, wav, wav0, dwav):
@@ -1094,83 +777,6 @@ def Interp_spectroscopy(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu
         Spectrum integrated over the surface.
     """
     logger.log(9, "start")
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,area,val_mu,wav,wav0,dwav,nsurf,nwav,nwav_arr,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, w1wav, w0wav, tmp_fl, tmp_wav;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu, j0wav, j1wav;
-    #pragma omp for
-    for (int i=0; i<nsurf; i++) {
-        //std::cout << "Surface index: " << i << std::endl;
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1+j0mu;
-        for (int k=0; k<nwav; k++) {
-            //std::cout << "  Wav index: " << k << std::endl;
-            //std::cout << "  wav(k): " << wav(k) << ", wav0: " << wav0 << ", dwav: " << dwav << std::endl;
-            tmp_wav = (wav(k)-wav0)/dwav;
-            //std::cout << "  tmp_wav: " << tmp_wav << std::endl;
-            j0wav = (int)tmp_wav;
-            w1wav = fmod(tmp_wav,1.);
-            w0wav = 1.-w1wav;
-            j1wav = j0wav+1;
-            if (j0wav < 0){
-                j0wav = 0;
-                j1wav = 0;
-            } else if (j1wav >= nwav_arr){
-                j0wav = nwav_arr-1;
-                j1wav = nwav_arr-1;
-            }
-            //std::cout << "  j0teff: " << j0teff << ", j0logg: " << j0logg << ", j0mu: " << j0mu << ", j0wav: " << j0wav << std::endl;
-            //std::cout << "  w0teff: " << w0teff << ", w0logg: " << w0logg << ", w0mu: " << w0mu << ", w0wav: " << w0wav << std::endl;
-            tmp_fl = \
-                ( w1mu * \
-                    ( w0wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j1mu,j0wav) + w1teff * grid(j1teff,j0logg,j1mu,j0wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j1mu,j0wav) + w1teff * grid(j1teff,j1logg,j1mu,j0wav) ) \
-                        ) \
-                    + w1wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j1mu,j1wav) + w1teff * grid(j1teff,j0logg,j1mu,j1wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j1mu,j1wav) + w1teff * grid(j1teff,j1logg,j1mu,j1wav) ) \
-                        ) \
-                    ) \
-                + w0mu * \
-                    ( w0wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j0mu,j0wav) + w1teff * grid(j1teff,j0logg,j0mu,j0wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j0mu,j0wav) + w1teff * grid(j1teff,j1logg,j0mu,j0wav) ) \
-                        ) \
-                    + w1wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j0mu,j1wav) + w1teff * grid(j1teff,j0logg,j0mu,j1wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j0mu,j1wav) + w1teff * grid(j1teff,j1logg,j0mu,j1wav) ) \
-                        ) \
-                    ) \
-                );
-            //std::cout << "tmp_fl " << tmp_fl << std::endl;
-            //std::cout << "area*val_mu " << area(i) * val_mu(i) << std::endl;
-            //std::cout << "fl " << tmp_fl * area(i) * val_mu(i) << std::endl;
-            fl(k) += exp(tmp_fl) * area(i) * val_mu(i);
-        }
-    }
-    }
-    """
-    #grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu, wav, wav0, dwav
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -1187,14 +793,34 @@ def Interp_spectroscopy(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu
     nwav = wav.size
     nwav_arr = grid.shape[-1]
     fl = np.zeros(nwav, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'wav', 'wav0', 'dwav', 'nsurf', 'nwav', 'nwav_arr', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Unlike Interp_doppler, the wavelength index
+    ## here depends only on the fixed target wavelength grid `wav` (not per
+    ## surface element), so it is computed once up front; each surface
+    ## element then contributes its (teff,logg,mu) quadrilinear interpolation
+    ## at those two wavelength indices, blended and summed. Chunked over
+    ## surface elements to bound memory.
+    tmp_wav = (wav-wav0)/dwav
+    j0wav = np.trunc(tmp_wav).astype(int)
+    w1wav = tmp_wav - np.trunc(tmp_wav)  # matches C's fmod(tmp_wav, 1.)
+    w0wav = 1.-w1wav
+    j1wav = j0wav+1
+    mask_low = j0wav < 0
+    mask_high = j1wav >= nwav_arr
+    j0wav = np.where(mask_low, 0, np.where(mask_high, nwav_arr-1, j0wav))
+    j1wav = np.where(mask_low, 0, np.where(mask_high, nwav_arr-1, j1wav))
+
+    chunk = max(1, 20_000_000 // max(nwav,1))
+    for start in range(0, nsurf, chunk):
+        sl = slice(start, start+chunk)
+        jteff_c = jteff[sl,None]; wteff_c = wteff[sl,None]
+        jlogg_c = jlogg[sl,None]; wlogg_c = wlogg[sl,None]
+        jmu_c = jmu[sl,None]; wmu_c = wmu[sl,None]
+        val0 = _Trilinear_at_wav(grid, jteff_c, jlogg_c, jmu_c, wteff_c, wlogg_c, wmu_c, j0wav[None,:])
+        val1 = _Trilinear_at_wav(grid, jteff_c, jlogg_c, jmu_c, wteff_c, wlogg_c, wmu_c, j1wav[None,:])
+        tmp_fl = w0wav[None,:]*val0 + w1wav[None,:]*val1
+        contrib = np.exp(tmp_fl) * (area[sl]*val_mu[sl])[:,None]
+        fl += contrib.sum(axis=0)
     logger.log(9, "end")
     return fl
 
@@ -1257,83 +883,6 @@ def Interp_spectroscopy_doppler(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area
         Spectrum integrated over the surface.
     """
     logger.log(9, "start")
-    code = """
-    #pragma omp parallel shared(grid,wteff,wlogg,wmu,jteff,jlogg,jmu,area,val_mu,wav,wav0,dwav,val_vel,nsurf,nwav,nwav_arr,fl) default(none)
-    {
-    double w1teff, w0teff, w1logg, w0logg, w1mu, w0mu, w1wav, w0wav, tmp_fl, tmp_wav;
-    int j0teff, j1teff, j0logg, j1logg, j0mu, j1mu, j0wav, j1wav;
-    #pragma omp for
-    for (int i=0; i<nsurf; i++) {
-        //std::cout << "Surface index: " << i << std::endl;
-        w1teff = wteff(i);
-        w0teff = 1.-w1teff;
-        j0teff = jteff(i);
-        j1teff = 1+j0teff;
-        w1logg = wlogg(i);
-        w0logg = 1.-w1logg;
-        j0logg = jlogg(i);
-        j1logg = 1+j0logg;
-        w1mu = wmu(i);
-        w0mu = 1.-w1mu;
-        j0mu = jmu(i);
-        j1mu = 1+j0mu;
-        for (int k=0; k<nwav; k++) {
-            //std::cout << "  Wav index: " << k << std::endl;
-            //std::cout << "  wav(k): " << wav(k) << ", wav0: " << wav0 << ", dwav: " << dwav << ", val_vel: " << val_vel(i) << std::endl;
-            tmp_wav = (wav(k)*(1+val_vel(i))-wav0)/dwav;
-            //std::cout << "  tmp_wav: " << tmp_wav << std::endl;
-            j0wav = (int)tmp_wav;
-            w1wav = fmod(tmp_wav,1.);
-            w0wav = 1.-w1wav;
-            j1wav = j0wav+1;
-            if (j0wav < 0){
-                j0wav = 0;
-                j1wav = 0;
-            } else if (j1wav >= nwav_arr){
-                j0wav = nwav_arr-1;
-                j1wav = nwav_arr-1;
-            }
-            //std::cout << "  j0teff: " << j0teff << ", j0logg: " << j0logg << ", j0mu: " << j0mu << ", j0wav: " << j0wav << std::endl;
-            //std::cout << "  w0teff: " << w0teff << ", w0logg: " << w0logg << ", w0mu: " << w0mu << ", w0wav: " << w0wav << std::endl;
-            tmp_fl = \
-                ( w1mu * \
-                    ( w0wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j1mu,j0wav) + w1teff * grid(j1teff,j0logg,j1mu,j0wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j1mu,j0wav) + w1teff * grid(j1teff,j1logg,j1mu,j0wav) ) \
-                        ) \
-                    + w1wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j1mu,j1wav) + w1teff * grid(j1teff,j0logg,j1mu,j1wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j1mu,j1wav) + w1teff * grid(j1teff,j1logg,j1mu,j1wav) ) \
-                        ) \
-                    ) \
-                + w0mu * \
-                    ( w0wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j0mu,j0wav) + w1teff * grid(j1teff,j0logg,j0mu,j0wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j0mu,j0wav) + w1teff * grid(j1teff,j1logg,j0mu,j0wav) ) \
-                        ) \
-                    + w1wav * \
-                        ( w0logg * \
-                            ( w0teff * grid(j0teff,j0logg,j0mu,j1wav) + w1teff * grid(j1teff,j0logg,j0mu,j1wav) ) \
-                        + w1logg * \
-                            ( w0teff * grid(j0teff,j1logg,j0mu,j1wav) + w1teff * grid(j1teff,j1logg,j0mu,j1wav) ) \
-                        ) \
-                    ) \
-                );
-            //std::cout << "tmp_fl " << tmp_fl << std::endl;
-            //std::cout << "area*val_mu " << area(i) * val_mu(i) << std::endl;
-            //std::cout << "fl " << tmp_fl * area(i) * val_mu(i) << std::endl;
-            fl(k) += exp(tmp_fl) * area(i) * val_mu(i) * (1+5*val_vel(i));
-        }
-    }
-    }
-    """
-    #grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu, wav, wav0, dwav
     grid = np.ascontiguousarray(grid, dtype=float)
     wteff = np.ascontiguousarray(wteff, dtype=float)
     wlogg = np.ascontiguousarray(wlogg, dtype=float)
@@ -1351,14 +900,35 @@ def Interp_spectroscopy_doppler(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area
     nwav = wav.size
     nwav_arr = grid.shape[-1]
     fl = np.zeros(nwav, dtype=float)
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'wav', 'wav0', 'dwav', 'val_vel', 'nsurf', 'nwav', 'nwav_arr', 'fl'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    tmp = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Same scheme as Interp_spectroscopy, but the
+    ## wavelength index now depends on both surface element (via its
+    ## Doppler velocity) and output pixel, so it is computed per
+    ## (surface-element, pixel) pair; a (1+5v) boosting factor is applied
+    ## per surface element. Chunked over surface elements to bound memory.
+    chunk = max(1, 20_000_000 // max(nwav,1))
+    for start in range(0, nsurf, chunk):
+        sl = slice(start, start+chunk)
+        jteff_c = jteff[sl,None]; wteff_c = wteff[sl,None]
+        jlogg_c = jlogg[sl,None]; wlogg_c = wlogg[sl,None]
+        jmu_c = jmu[sl,None]; wmu_c = wmu[sl,None]
+        val_vel_c = val_vel[sl,None]
+
+        tmp_wav = (wav[None,:]*(1+val_vel_c) - wav0)/dwav
+        j0wav = np.trunc(tmp_wav).astype(int)
+        w1wav = tmp_wav - np.trunc(tmp_wav)  # matches C's fmod(tmp_wav, 1.)
+        w0wav = 1.-w1wav
+        j1wav = j0wav+1
+        mask_low = j0wav < 0
+        mask_high = j1wav >= nwav_arr
+        j0wav = np.where(mask_low, 0, np.where(mask_high, nwav_arr-1, j0wav))
+        j1wav = np.where(mask_low, 0, np.where(mask_high, nwav_arr-1, j1wav))
+
+        val0 = _Trilinear_at_wav(grid, jteff_c, jlogg_c, jmu_c, wteff_c, wlogg_c, wmu_c, j0wav)
+        val1 = _Trilinear_at_wav(grid, jteff_c, jlogg_c, jmu_c, wteff_c, wlogg_c, wmu_c, j1wav)
+        tmp_fl = w0wav*val0 + w1wav*val1
+        contrib = np.exp(tmp_fl) * (area[sl]*val_mu[sl]*(1+5*val_vel[sl]))[:,None]
+        fl += contrib.sum(axis=0)
     logger.log(9, "end")
     return fl
 

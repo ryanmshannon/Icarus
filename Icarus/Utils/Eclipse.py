@@ -69,215 +69,96 @@ def Hsr_c(faces_b, vertices_b, r_vertices_b, assoc_b, faces_f, vertices_f, r_ver
 
     >>> weights = Hsr_c(y1, z1, y2, z2, faces)
     """
-    support_code = """
-    #include <iostream>
-    // method to convert 3d coordinate to sky plane projection
-    void to_skyplane( double x, double y, double z, double incl, double orbph, double offsety, double offsetz, double *ynew, double *znew ) {
-        double cos_incl, sin_incl, cos_phs, sin_phs, xnew;
+    def _to_skyplane(x, y, z, incl, orbph, offsety, offsetz):
+        cos_incl, sin_incl = np.cos(incl), np.sin(incl)
+        cos_phs, sin_phs = np.cos(orbph), np.sin(orbph)
+        xnew = x*cos_phs + y*sin_phs
+        ynew = -x*sin_phs + y*cos_phs + offsety
+        znew = z*sin_incl + xnew*cos_incl + offsetz
+        return ynew, znew
 
-        cos_incl = cos(incl);
-        sin_incl = sin(incl);
-        cos_phs = cos(orbph);
-        sin_phs = sin(orbph);
-        xnew = x*cos_phs + y*sin_phs;
-        *ynew = -x*sin_phs + y*cos_phs + offsety;
-        *znew = z*sin_incl + xnew*cos_incl + offsetz;
-        //*ynew = 5.;
-        //*znew = 10.;
-        //std::cout << "Test" << std::endl;
-        //std::cout << *ynew << std::endl;
-        //std::cout << *znew << std::endl;
+    def _inside_triangle_vec(py, pz, y1, z1, y2, z2, y3, z3):
+        detT = (y1-y3)*(z2-z3) - (z1-z3)*(y2-y3)
+        lambda1 = ((z2-z3)*(py-y3) - (y2-y3)*(pz-z3)) / detT
+        lambda2 = (-(z1-z3)*(py-y3) + (y1-y3)*(pz-z3)) / detT
+        lambda3 = 1 - lambda1 - lambda2
+        return (0. <= lambda1) & (lambda1 <= 1.) & (0. <= lambda2) & (lambda2 <= 1.) & (0. <= lambda3) & (lambda3 <= 1.)
 
-    }
-
-    // function that returns true if the point py,pz lies inside
-    // the triangle described by y1,2,3 and z1,2,3
-    bool inside_triangle( double py, double pz, double y1, double z1, double y2, double z2, double y3, double z3 ) {
-        double detT,lambda1,lambda2,lambda3;
-
-        detT = (y1-y3)*(z2-z3) - (z1-z3)*(y2-y3);
-        lambda1 = ((z2-z3)*(py-y3) - (y2-y3)*(pz-z3)) / detT;
-        lambda2 = (-(z1-z3)*(py-y3) + (y1-y3)*(pz-z3)) / detT;
-        lambda3 = 1 - lambda1 - lambda2;
-        return (0. <= lambda1) && (lambda1 <= 1.) && (0. <= lambda2) && (lambda2 <= 1.) && (0. <= lambda3) and (lambda3 <= 1.);
-    }
-    """
-
-    code = """
-
-    //FILE * pfile;
-    //pfile = fopen("debug.txt","w");
-
-    double PI = 4 * atan(1);
-
-    double phs_b = orbph*2*PI;
-    double phs_f = (orbph+0.5)*2*PI;
-
-    // calculate the offset of the eclipsing star
-    double offsety_f, offsetz_f;
-    to_skyplane( 1/(1+q), 0., 0., incl, phs_f, 0., 0., &offsety_f, &offsetz_f );
-
-    //fprintf(pfile, "Offset front: %f %f\\n",offsety_f,offsetz_f);
-    //printf("Offset front: %f %f\\n",offsety_f,offsetz_f);
-
-    // Vy,Vz: sky plane coordinates of eclipsing star vertices
-    double Vy[n_vertices_f], Vz[n_vertices_f];
-
-    // loop through the vertices of the eclipsing star to convert to sky plane
-    for (int i=0; i<n_vertices_f; i++) {
-        to_skyplane( vertices_f(i,0)*r_vertices_f(i),vertices_f(i,1)*r_vertices_f(i),vertices_f(i,2)*r_vertices_f(i),incl,phs_f,offsety_f,offsetz_f,&Vy[i],&Vz[i] );
-    }
-    // loop through the vertices of the eclipsing star to convert to sky plane
-
-    // calculate the offset of the eclipsed star
-    double offsety_b, offsetz_b;
-    to_skyplane( q/(1+q), 0., 0., incl, phs_b, 0., 0., &offsety_b, &offsetz_b );
-
-    //fprintf(pfile, "Offset back: %f %f\\n",offsety_b,offsetz_b);
-    //printf("Offset back: %f %f\\n",offsety_b,offsetz_b);
-
-    double vx, vy, vz;
-    double y, z;
-    double dist2, dr2;
-    double y1, z1, y2, z2, y3, z3;
-    int id_vertice_f, id_surface_b, id_surface_f, id;
-    // loop through the vertices of the eclipsed star
-    for (int i=0; i<n_vertices_b; i++) {
-        // first, retrieve the vertice coordinates
-        vx = vertices_b(i,0);
-        vy = vertices_b(i,1);
-        vz = vertices_b(i,2);
-        // transform the vertice coordinates to the sky plane
-        to_skyplane( vx*r_vertices_b(i),vy*r_vertices_b(i),vz*r_vertices_b(i),incl,phs_b,offsety_b,offsetz_b,&y,&z );
-
-        //fprintf(pfile, "  Vertice %i: (x,y,z) %f %f %f; (sky y, sky z) [%f], [%f]\\n",i,vx,vy,vz,y,z);
-        //printf("  Vertice %i: (x,y,z) %f %f %f; (sky y, sky z) [%f], [%f]\\n",i,vx,vy,vz,y,z);
-
-        // optimize the occlusion algorithm
-        dr2 = pow(y-offsety_f,2) + pow(z-offsetz_f,2);
-
-        // if the point is further than the maximum extent of the
-        // eclipsing star, we just step to the next surface element.
-        if (dr2 > pow(rmax_f,2)) {
-            //fprintf(pfile, "    Continue (clearly outside!)");
-            //printf("    Continue (clearly outside!)");
-            continue;
-
-        // if the next point is within the minimum extent of the
-        // eclipsing star, it is necessarily hidden so we add the
-        // weights right away.
-        } else if (dr2 < pow(rmin_f,2)) {
-            // for each face that the vertice belongs to
-            for (int m=0; m<6; m++) {
-                id_surface_b = assoc_b(i,m);
-                //fprintf(pfile, "    Tagging id_surface_b %i\\n",id_surface_b);
-                //printf("    Tagging id_surface_b %i\\n",id_surface_b);
-                if (id_surface_b >= 0) {
-                    weight(id_surface_b) += 1.;
-                }
-            }
-            // for each face that the vertice belongs to
-
-        // if none of the above conditions is met, we have to go
-        // through the lengthy calculation.
-        } else {
-
-            // identify the nearest vertice of the eclipsing star
-            // for each vertice of the eclipsing star
-            id = 0;
-            dist2 = 10.;
-            for (int l=0; l<n_vertices_f; l++) {
-                dr2 = pow(y-Vy[l],2) + pow(z-Vz[l],2);
-                //fprintf(pfile, "  l %i; Vy: %f, Vz: %f, dr2: %f\\n",l,Vy[l],Vz[l],dr2);
-                if (dr2 < dist2) {
-                    id = l;
-                    dist2 = dr2;
-                }
-            }
-            // for each vertice of the eclipsing star
-
-            //fprintf(pfile, "    Nearest front vertice %i at %f\\n",id,dist2);
-            //printf("    Nearest front vertice %i at %f\\n",id,dist2);
-
-            // once we know the nearest vertice of the eclipsing star
-            // to the vertice of the eclipsed star, we check if the latter
-            // lies inside one of its associated surfaces. If it does, we
-            // add one unit to the weight of that face.
-            // for each associated face
-            for (int k=0; k<6; k++) {
-                id_surface_f = assoc_f(id,k);
-                // if the id < 0 (i.e. -99), the vertice has no 6th
-                // associated surface so we continue the loop with the
-                // next surface id
-                if (id_surface_f < 0) continue;
-                id_vertice_f = faces_f(id_surface_f,0);
-                y1 = Vy[id_vertice_f];
-                z1 = Vz[id_vertice_f];
-                id_vertice_f = faces_f(id_surface_f,1);
-                y2 = Vy[id_vertice_f];
-                z2 = Vz[id_vertice_f];
-                id_vertice_f = faces_f(id_surface_f,2);
-                y3 = Vy[id_vertice_f];
-                z3 = Vz[id_vertice_f];
-                //fprintf(pfile, "    Nearest vertice %i: id_surface_f %i (%i); [%f, %f, %f], [%f, %f, %f]\\n",id,id_surface_f,k,y1,y2,y3,z1,z2,z3);
-                //printf("    Nearest vertice %i: id_surface_f %i (%i); [%f, %f, %f], [%f, %f, %f]\\n",id,id_surface_f,k,y1,y2,y3,z1,z2,z3);
-                // if vertice is hidden
-                if (inside_triangle( y,z,y1,z1,y2,z2,y3,z3 )) {
-                    // if the vertice is hidden, add 1 to the weight
-                    // of each face that it belongs to
-                    // for each face that the vertice belongs to
-                    for (int m=0; m<6; m++) {
-                        id_surface_b = assoc_b(i,m);
-                        if (id_surface_b >= 0) {
-                            weight(id_surface_b) += 1.;
-                            //fprintf(pfile, "      Hiding %i (%i), weight %f\\n",id_surface_b,m,weight(id_surface_b));
-                            //printf("      Hiding %i (%i), weight %f\\n",id_surface_b,m,weight(id_surface_b));
-                        }
-                    }
-                    // for each face that the vertice belongs to
-                    // unnecessary to loop further
-                    k = 6;
-                }
-                // if vertice is hidden
-            }
-            // for each associated face
-        }
-        // optimize the occlusion algorithm
-    }
-    // loop through the vertices of the eclipsed star
-
-    // loop through the faces of the eclipsed star to normalize the weights
-    for (int i=0; i<n_faces_b; i++) {
-        // we normalize and subtract so that a fully covered face
-        // has a weight of 0 and a non-covered one 1.
-        //printf("%i %f",i,weight(i));
-        weight(i) = 1-weight(i)/3.;
-        //printf("  %f\\n",weight(i));
-    }
-    // loop through the faces of the eclipsed star to normalize the weights
-
-
-    //fclose(pfile);
-
-    """
     vertices_b = np.ascontiguousarray(vertices_b, dtype=float)
     r_vertices_b = np.ascontiguousarray(r_vertices_b, dtype=float)
-    assoc_b = np.ascontiguousarray(assoc_b, dtype=float)
-    faces_f = np.ascontiguousarray(faces_f, dtype=float)
+    assoc_b = np.ascontiguousarray(assoc_b, dtype=int)
+    faces_f = np.ascontiguousarray(faces_f, dtype=int)
     vertices_f = np.ascontiguousarray(vertices_f, dtype=float)
     r_vertices_f = np.ascontiguousarray(r_vertices_f, dtype=float)
-    assoc_f = np.ascontiguousarray(assoc_f, dtype=float)
-    n_vertices_b = vertices_b.shape[0]
-    n_vertices_f = vertices_f.shape[0]
+    assoc_f = np.ascontiguousarray(assoc_f, dtype=int)
     n_faces_b = faces_b.shape[0]
     incl = float(incl)
     q = float(q)
     rmax_f = float(rmax_f)
     rmin_f = float(rmin_f)
     weight = np.zeros(n_faces_b, dtype=float)
-    #extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-    extra_compile_args = extra_link_args = ['']
-    tmp = weave.inline(code, ['vertices_b', 'r_vertices_b', 'assoc_b', 'faces_f', 'vertices_f', 'r_vertices_f', 'assoc_f', 'n_vertices_b', 'n_vertices_f', 'n_faces_b', 'incl', 'orbph', 'q', 'rmax_f', 'rmin_f', 'weight'], type_converters=weave.converters.blitz, compiler='gcc', support_code=support_code, extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=['<cstdio>', '<cmath>', '<omp.h>'], verbose=1)
+    ## Pure-NumPy replacement for the weave.inline/support_code block above
+    ## (scipy.weave is no longer available). Sky-plane projection is
+    ## vectorized over all vertices; the three mutually-exclusive per-vertex
+    ## cases (clearly outside / fully hidden / needs the nearest-vertex +
+    ## point-in-triangle test) are handled with boolean masks, restricting
+    ## the expensive nearest-vertex search and triangle test to only the
+    ## subset of eclipsed-star vertices that actually need it. The "first
+    ## matching associated face wins" early-exit behavior of the original
+    ## C loop over up to 6 candidate faces is preserved via a `found` mask
+    ## updated across a (fixed, <=6 iteration) loop. Weight contributions
+    ## are applied via a scatter-add (np.add.at), since a face can be
+    ## reached from more than one vertex.
+    PI = 4*np.arctan(1.)
+    phs_b = orbph*2*PI
+    phs_f = (orbph+0.5)*2*PI
+
+    offsety_f, offsetz_f = _to_skyplane(1/(1+q), 0., 0., incl, phs_f, 0., 0.)
+    Vy, Vz = _to_skyplane(vertices_f[:,0]*r_vertices_f, vertices_f[:,1]*r_vertices_f, vertices_f[:,2]*r_vertices_f,
+                           incl, phs_f, offsety_f, offsetz_f)
+
+    offsety_b, offsetz_b = _to_skyplane(q/(1+q), 0., 0., incl, phs_b, 0., 0.)
+    y, z = _to_skyplane(vertices_b[:,0]*r_vertices_b, vertices_b[:,1]*r_vertices_b, vertices_b[:,2]*r_vertices_b,
+                         incl, phs_b, offsety_b, offsetz_b)
+
+    dr2 = (y-offsety_f)**2 + (z-offsetz_f)**2
+    mask_outside = dr2 > rmax_f**2
+    mask_hidden = (~mask_outside) & (dr2 < rmin_f**2)
+    mask_test = (~mask_outside) & (~mask_hidden)
+
+    is_hidden = mask_hidden.copy()
+
+    if mask_test.any():
+        y_t, z_t = y[mask_test], z[mask_test]
+        dist2 = (y_t[:,None]-Vy[None,:])**2 + (z_t[:,None]-Vz[None,:])**2
+        nearest_id = np.argmin(dist2, axis=1)
+
+        n_test = y_t.size
+        found = np.zeros(n_test, dtype=bool)
+        for k in range(6):
+            active = ~found
+            if not active.any():
+                break
+            active_idx = np.nonzero(active)[0]
+            id_surface_f = assoc_f[nearest_id[active_idx], k]
+            valid = id_surface_f >= 0
+            valid_idx = active_idx[valid]
+            if valid_idx.size == 0:
+                continue
+            sf = id_surface_f[valid]
+            v0, v1, v2 = faces_f[sf,0], faces_f[sf,1], faces_f[sf,2]
+            inside = _inside_triangle_vec(y_t[valid_idx], z_t[valid_idx], Vy[v0], Vz[v0], Vy[v1], Vz[v1], Vy[v2], Vz[v2])
+            found[valid_idx[inside]] = True
+
+        test_idx_global = np.nonzero(mask_test)[0]
+        is_hidden[test_idx_global[found]] = True
+
+    np.add.at(weight, assoc_b[is_hidden, :5].ravel(), 1.)
+    assoc_b6 = assoc_b[is_hidden, 5]
+    valid6 = assoc_b6 != -99
+    np.add.at(weight, assoc_b6[valid6], 1.)
+
+    weight = 1 - weight/3.
     return weight
 
 def Inside_triangle(p, a, b, c):
@@ -300,94 +181,46 @@ def Occultation_approx(vertices, r_vertices, assoc, n_faces, incl, orbph, q, nth
     Returns the weight of each face/surface element with
     0, 1, 2, 3; going from not covered to fully covered.
     """
-    support_code = """
-    #include <iostream>
-    // method to convert 3d coordinate to sky plane projection
-    void to_skyplane( double x, double y, double z, double incl, double orbph, double offsety, double offsetz, double *ynew, double *znew ) {
-        double cos_incl, sin_incl, cos_phs, sin_phs, xnew;
+    def _to_skyplane(x, y, z, incl, orbph, offsety, offsetz):
+        cos_incl, sin_incl = np.cos(incl), np.sin(incl)
+        cos_phs, sin_phs = np.cos(orbph), np.sin(orbph)
+        xnew = x*cos_phs + y*sin_phs
+        ynew = -x*sin_phs + y*cos_phs + offsety
+        znew = z*sin_incl + xnew*cos_incl + offsetz
+        return ynew, znew
 
-        cos_incl = cos(incl);
-        sin_incl = sin(incl);
-        cos_phs = cos(orbph);
-        sin_phs = sin(orbph);
-        xnew = x*cos_phs + y*sin_phs;
-        *ynew = -x*sin_phs + y*cos_phs + offsety;
-        *znew = z*sin_incl + xnew*cos_incl + offsetz;
-        //*ynew = 5.;
-        //*znew = 10.;
-        //std::cout << "Test" << std::endl;
-        //std::cout << *ynew << std::endl;
-        //std::cout << *znew << std::endl;
-    }
-    """
-
-    code = """
-    double tmp_y, tmp_z;
-    double offsety, offsetz;
-
-    to_skyplane( -1./(1.+q), 0., 0., incl, orbph, 0., 0., &offsety, &offsetz );
-    //std::cout << offsety << " " << offsetz << std::endl;
-    tmp_y = offsety;
-    tmp_z = offsetz;
-    to_skyplane( q/(1.+q), 0., 0., incl, orbph, 0., 0., &offsety, &offsetz );
-    //std::cout << offsety << " " << offsetz << std::endl;
-    offsety -= tmp_y;
-    offsetz -= tmp_z;
-
-    #pragma omp parallel shared(n_vertices,vertices,assoc,r_vertices,incl,orbph,weight,ntheta,radii,offsety,offsetz) default(none)
-    {
-    int ind;
-    double vx, vy, vz;
-    double y, z;
-    double theta, w, r;
-    int pos;
-    #pragma omp for
-    for (int i=0; i<n_vertices; i++) {
-        // first, retrieve the vertice coordinates
-        vx = vertices(i,0);
-        vy = vertices(i,1);
-        vz = vertices(i,2);
-        // transform the vertice coordinates to the sky plane
-        to_skyplane( vx*r_vertices(i),vy*r_vertices(i),vz*r_vertices(i),incl,orbph,offsety,offsetz,&y,&z );
-
-        theta = atan2(z,y);
-        pos = int( theta/ntheta );
-        w = theta/ntheta - pos;
-        //std::cout << "Test" << std::endl;
-        //std::cout << theta << " " << pos << " " << w << std::endl;
-        r = radii(pos)*(1-w) + radii(pos+1)*w;
-
-        if ((pow(y,2)+pow(z,2)) < pow(r,2)) {
-            for (int j=0; j<5; j++) {
-                ind = assoc(i, j);
-                weight(ind) += 1.;
-            }
-            if (assoc(i, 5) != -99) {
-                ind = assoc(i, 5);
-                weight(ind) += 1.;
-            }
-        }
-    }
-    }
-    """
     vertices = np.ascontiguousarray(vertices, dtype=float)
-    assoc = np.ascontiguousarray(assoc, dtype=float)
+    assoc = np.ascontiguousarray(assoc, dtype=int)
     r_vertices = np.ascontiguousarray(r_vertices, dtype=float)
     radii = np.ascontiguousarray(radii, dtype=float)
     incl = float(incl)
     orbph = float(orbph)
     q = float(q)
     ntheta = int(ntheta)
-    n_vertices = vertices.shape[0]
     weight = np.zeros(n_faces, dtype=float)
-    try:
-        if os.uname()[0] == 'Darwin':
-            extra_compile_args = extra_link_args = ['-O3']
-        else:
-            extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        tmp = weave.inline(code, ['n_vertices', 'vertices', 'assoc', 'r_vertices', 'incl', 'orbph', 'q', 'weight', 'ntheta', 'radii'], type_converters=weave.converters.blitz, compiler='gcc', support_code=support_code, extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=['<cstdio>', '<cmath>', '<omp.h>'], verbose=2, force=0)
-    except:
-        tmp = weave.inline(code, ['n_vertices', 'vertices', 'assoc', 'r_vertices', 'incl', 'orbph', 'q', 'weight', 'ntheta', 'radii'], type_converters=weave.converters.blitz, compiler='gcc', support_code=support_code, extra_compile_args=['-O3'], extra_link_args=['-O3'], headers=['<cstdio>', '<cmath>'], verbose=2, force=0)
+    ## Pure-NumPy replacement for the weave.inline/support_code block above
+    ## (scipy.weave is no longer available). Vectorized sky-plane
+    ## projection and occultation test over all vertices at once, followed
+    ## by a scatter-add (np.add.at, needed since a face can be reached via
+    ## more than one vertex) of the weight contributions.
+    tmp_y, tmp_z = _to_skyplane(-1./(1.+q), 0., 0., incl, orbph, 0., 0.)
+    offsety, offsetz = _to_skyplane(q/(1.+q), 0., 0., incl, orbph, 0., 0.)
+    offsety -= tmp_y
+    offsetz -= tmp_z
+
+    vx, vy, vz = vertices[:,0], vertices[:,1], vertices[:,2]
+    y, z = _to_skyplane(vx*r_vertices, vy*r_vertices, vz*r_vertices, incl, orbph, offsety, offsetz)
+
+    theta_over_ntheta = np.arctan2(z, y)/ntheta
+    pos = theta_over_ntheta.astype(int)  # C's (int) cast truncates toward zero, like astype(int)
+    w = theta_over_ntheta - pos
+    r = radii[pos]*(1-w) + radii[pos+1]*w
+
+    mask = (y**2+z**2) < r**2
+    np.add.at(weight, assoc[mask, :5].ravel(), 1.)
+    assoc6 = assoc[mask, 5]
+    valid6 = assoc6 != -99
+    np.add.at(weight, assoc6[valid6], 1.)
 
     return weight
 
@@ -572,29 +405,14 @@ def Weights_transit(inds_highres, weight_highres, n_lowres):
     """Weights_transit(inds_highres, weight_highres, n_lowres)
 
     """
-    code = """
-    #pragma omp parallel shared(n_highres,weight_lowres,weight_highres,inds_highres) default(none)
-    {
-    int ind;
-    #pragma omp for
-    for (int i=0; i<n_highres; i++) {
-        ind = inds_highres(i);
-        weight_lowres(ind) += weight_highres(i);
-    }
-    }
-    """
-
-    inds_highres = np.ascontiguousarray(inds_highres, dtype=float)
+    inds_highres = np.ascontiguousarray(inds_highres, dtype=int)
     weight_highres = np.ascontiguousarray(weight_highres, dtype=float)
     n_lowres = int(n_lowres)
-    n_highres = inds_highres.shape[0]
     weight_lowres = np.zeros(n_lowres, dtype=float)
-    try:
-        if os.uname()[0] == 'Darwin':
-            extra_compile_args = extra_link_args = ['-O3']
-        else:
-            extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        get_assoc = weave.inline(code, ['n_highres', 'weight_lowres', 'weight_highres', 'inds_highres'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=['<omp.h>'], libraries=['m'], verbose=2, force=0)
-    except:
-        get_assoc = weave.inline(code, ['n_highres', 'weight_lowres', 'weight_highres', 'inds_highres'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=['-O3'], extra_link_args=['-O3'], libraries=['m'], verbose=2, force=0)
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available): a scatter-add. np.add.at (not plain fancy
+    ## indexing) is required since the same low-res index can be targeted
+    ## by more than one high-res element and those contributions must
+    ## accumulate rather than overwrite.
+    np.add.at(weight_lowres, inds_highres, weight_highres)
     return weight_lowres

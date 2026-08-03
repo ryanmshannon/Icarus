@@ -114,46 +114,19 @@ def Doppler_shift_spectrum(fref, wref, wobs, v):
     v = float(v)
     nref = wref.size
     nobs = wobs.size
-    fobs = np.empty(nobs, dtype=float)
-    code = """
-    #pragma omp parallel shared(wref,wobs,fref,fobs,nref,nobs,v) default(none)
-    {
-    int jl, ju, jm, j;
-    double w, wav;
-    bool ascending = wref(nref-1) > wref(0);
-    #pragma omp for
-    //std::cout << nobs << std::endl;
-    for (int i=0; i<nobs; ++i) {
-        wav = wobs(i)*(1+v);
-        //std::cout << i << " " << wav << std::endl;
-        jl = 0;
-        ju = nref;
-        while ((ju-jl) > 1)
-        {
-            //std::cout << "+++" << std::endl;
-            //std::cout << jl << " " << ju << " " << jm << std::endl;
-            jm = (ju+jl)/2;
-            //std::cout << i << " " << wav << " " << wref(jm) << std::endl;
-            if (ascending == (wav > wref(jm)))
-                jl = jm;
-            else
-                ju = jm;
-            //std::cout << jl << " " << ju << " " << jm << std::endl;
-        }
-        j = (jl < (nref-1) ? jl : nref-2);
-        w = (wav-wref(j))/(wref(j+1)-wref(j));
-        fobs(i) = (fref(j)*(1-w) + fref(j+1)*w) * (1+5*v);
-    }
-    }
-    """
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Same bisection-based linear interpolation as
+    ## Getaxispos_vector, applied to the Doppler-shifted wavelengths, with
+    ## the (1+5v) boosting factor applied to the interpolated flux.
+    wav = wobs*(1+v)
+    ascending = wref[-1] > wref[0]
+    if ascending:
+        j = np.searchsorted(wref, wav, side='right') - 1
     else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_axispos = weave.inline(code, ['wref', 'wobs', 'fref', 'fobs', 'nref', 'nobs', 'v'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, verbose=2)
-    tmp = get_axispos
+        j = (nref - 1) - np.searchsorted(wref[::-1], wav, side='left')
+    j = np.clip(j, 0, nref-2)
+    w = (wav - wref[j]) / (wref[j+1] - wref[j])
+    fobs = (fref[j]*(1-w) + fref[j+1]*w) * (1+5*v)
     logger.log(5, "end")
     return fobs
 
@@ -184,83 +157,61 @@ def Doppler_shift_spectrum_integrate(fref, wobs, v, refstart, refstep):
     """
     nobs = wobs.size
     nref = fref.size
-    fbin = np.zeros(nobs, dtype=float)
     fref = np.ascontiguousarray(fref, dtype=float)
     wobs = np.ascontiguousarray(wobs, dtype=float)
     v = float(v)
     refstart = float(refstart)
     refstep = float(refstep)
-    code = """
-    #line 10
-    //double refstart; // start wavelength of the reference spectrum
-    //double refstep; // bin width of the reference spectrum
-    //int nobs; // length of observed spectrum
-    //int nref; // length of reference spectrum
-    //double fref; // flux of the reference spectrum
-    //double fbin; // integrated flux of the reference spectrum OUTPUT
-    //double wobs; // wavelength of the observed spectrum
-    double wl, wu; // lower/upper bin limit of the observed spectrum
-    double refposl; // index of the lower side of the observed spectrum in the reference spectrum
-    double refposu; // index of the upper side of the observed spectrum in the reference spectrum
-    int irefl; // rounded integer part of refposl
-    int irefu; // rounded integer part of refposu
-    //double scale = sqrt( (1.+v/299792458.0)/(1.-v/299792458.0) ); // this is the Doppler scaling factor for the observed wavelength
-    double scale = 1.+v;
-    #line 30
-    for (int n=0; n<nobs; ++n) {
-        //std::cout << "n: " << n << std::endl;
-        if (n == 0) { // special condition for the first data point
-            wl = wobs(n) - (wobs(n+1)-wobs(n))*0.5; // the observed bin's lower wavelength value
-            wu = (wobs(n)+wobs(n+1))*0.5; // the observed bin's upper wavelength value
-            wl *= scale;
-            wu *= scale;
-        } else if (n < nobs-1) {
-            wl = (wobs(n)+wobs(n-1))*0.5; // the observed bin's lower wavelength value
-            wu = (wobs(n)+wobs(n+1))*0.5; // the observed bin's upper wavelength value
-            wl *= scale;
-            wu *= scale;
-        } else {
-            wl = (wobs(n)+wobs(n-1))*0.5; // the observed bin's lower wavelength value
-            wu = wobs(n) + (wobs(n)-wobs(n-1))*0.5; // the observed bin's upper wavelength value
-            wl *= scale;
-            wu *= scale;
-        }
-        //std::cout << "wl, wu: " << wl << " " << wu << std::endl;
-        #line 50
-        refposl = (wl - refstart) / refstep;
-        refposu = (wu - refstart) / refstep;
-        irefl = (int) (refposl+0.5);
-        irefu = (int) (refposu+0.5);
-        //std::cout << "refposl, refposu, irefl, irefu: " << refposl << " " << refposu << " " << irefl << " " << irefu << " " << std::endl;
-        //std::cout << "fbin(n)1: " << fbin(n) << std::endl;
-        if (irefl < 0)
-            fbin(n) = fref(0); // assign first flux value if beyond lower reference spectrum limit
-        else if (irefu > nref-1)
-            fbin(n) = fref(nref-1); // assign last flux value if beyond upper reference spectrum limit
-        #line 70
-        else {
-            if (irefl == irefu) {
-                //std::cout << "irefl == irefu" << std::endl;
-                fbin(n) += (refposu-refposl) * fref(irefl); // we add fraction of the bin that covers the observed bin
-            } else {
-                //std::cout << "irefl != irefu" << std::endl;
-                fbin(n) += (0.5-(refposl-irefl)) * fref(irefl); // we add the fraction covered by the lower bin of the reference spectrum
-                fbin(n) += (0.5+(refposu-irefu)) * fref(irefu); // we add the fraction covered by the upper bin of the reference spectrum
-            }
-            //std::cout << "fbin(n)2: " << fbin(n) << std::endl;
-            for (int i=irefl+1; i<irefu; ++i) {
-                fbin(n) += fref(i); // we add the whole bins
-            }
-            //std::cout << "fbin(n)3: " << fbin(n) << std::endl;
-            //if (n == 200) printf( "v: %f, wu-wl: %f, norm: %f\\n", v, (wu-wl), refstep/(wu-wl) );
-            fbin(n) *= refstep/(wu-wl); // we normalize in order to get the average flux
-            fbin(n) *= (1+5*v);
-            //std::cout << "fbin(n)4: " << fbin(n) << std::endl;
-        }
-    }
-    """
-    rebin = weave.inline(code, ['refstart', 'refstep', 'nobs', 'nref', 'fref', 'fbin', 'wobs', 'v'], type_converters=weave.converters.blitz, compiler='gcc', libraries=['m'])
-    tmp = rebin
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). For each observed bin [wl,wu] (Doppler
+    ## shifted by `scale`), integrates (with edge fractions) the reference
+    ## spectrum bins it covers, normalizes by bin width, and applies the
+    ## (1+5v) boosting factor -- identical arithmetic to the C code it
+    ## replaces, vectorized over all bins at once. Bins entirely below/above
+    ## the reference spectrum's range are assigned the first/last reference
+    ## flux value directly (no normalization/boosting), as in the original.
+    scale = 1.+v
+    wl = np.empty(nobs, dtype=float)
+    wu = np.empty(nobs, dtype=float)
+    wl[0] = wobs[0] - (wobs[1]-wobs[0])*0.5
+    wu[0] = (wobs[0]+wobs[1])*0.5
+    wl[1:-1] = (wobs[1:-1]+wobs[:-2])*0.5
+    wu[1:-1] = (wobs[1:-1]+wobs[2:])*0.5
+    wl[-1] = (wobs[-1]+wobs[-2])*0.5
+    wu[-1] = wobs[-1] + (wobs[-1]-wobs[-2])*0.5
+    wl *= scale
+    wu *= scale
+
+    refposl = (wl - refstart) / refstep
+    refposu = (wu - refstart) / refstep
+    ## C's (int) cast truncates toward zero, unlike np.floor.
+    irefl = np.trunc(refposl+0.5).astype(np.int64)
+    irefu = np.trunc(refposu+0.5).astype(np.int64)
+
+    fbin = np.empty(nobs, dtype=float)
+    mask_below = irefl < 0
+    mask_above = (~mask_below) & (irefu > nref-1)
+    mask_valid = (~mask_below) & (~mask_above)
+
+    fbin[mask_below] = fref[0]
+    fbin[mask_above] = fref[-1]
+
+    il = irefl[mask_valid]
+    iu = irefu[mask_valid]
+    rl = refposl[mask_valid]
+    ru = refposu[mask_valid]
+    mask_eq = il == iu
+    fval = np.where(mask_eq,
+                     (ru-rl) * fref[il],
+                     (0.5-(rl-il))*fref[il] + (0.5+(ru-np.where(mask_eq, il, iu)))*fref[np.where(mask_eq, il, iu)])
+    ## Add the whole reference bins strictly between il and iu (empty range
+    ## when mask_eq or when iu == il+1), via a prefix sum.
+    cumfref = np.concatenate(([0.], np.cumsum(fref)))
+    whole = np.where(mask_eq, 0., cumfref[iu] - cumfref[il+1])
+    fval = fval + whole
+    fval *= refstep/(wu[mask_valid]-wl[mask_valid])
+    fval *= (1+5*v)
+    fbin[mask_valid] = fval
     return fbin
 
 def FFTConvolve1D(in1, in2, axis=-1):
@@ -322,32 +273,19 @@ def Getaxispos_scalar(xold, xnew):
 
     weight,index = Getaxispos_scalar(xold, xnew)
     """
-    code = """
-    int jl, ju, jm;
-    double w;
-    bool ascending = xold(n-1) > xold(0);
-    jl = 0;
-    ju = n;
-    while ((ju-jl) > 1)
-    {
-        jm = (ju+jl)/2;
-        if (ascending == (xnew > xold(jm)))
-            jl = jm;
-        else
-            ju = jm;
-    }
-    jl = (jl < (n-1) ? jl : n-2);
-    w = (xnew-xold(jl))/(xold(jl+1)-xold(jl));
-    py::tuple results(2);
-    results[0] = w;
-    results[1] = jl;
-    return_val = results;
-    """
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Scalar special-case of Getaxispos_vector's
+    ## bisection search.
     xold = np.ascontiguousarray(xold, dtype=float)
     xnew = float(xnew)
     n = xold.shape[0]
-    get_axispos = weave.inline(code, ['xold', 'xnew', 'n'], type_converters=weave.converters.blitz, compiler='gcc', verbose=2)
-    w,j = get_axispos
+    ascending = xold[-1] > xold[0]
+    if ascending:
+        j = np.searchsorted(xold, xnew, side='right') - 1
+    else:
+        j = (n - 1) - np.searchsorted(xold[::-1], xnew, side='left')
+    j = int(np.clip(j, 0, n-2))
+    w = (xnew - xold[j]) / (xold[j+1] - xold[j])
     return w,j
 
 def Getaxispos_vector(xold, xnew):
@@ -424,38 +362,24 @@ def General_polynomial_fit(y, x=None, err=None, coeff=1, Xfnct=None, Xfnct_offse
         Xfnct_offset = 1
     else:
         Xfnct_offset = 0
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). The C code's recurrence a(i,coeff-1-k) =
+    ## a(i,coeff-k)*x(i) (for k>=1, or k>=2 in the offset case) just builds
+    ## successive powers of x(i), so each column of the design matrix is a
+    ## power of x times a base value -- computed directly here rather than
+    ## recursively.
+    base = Xfnct/err
     a = np.empty((n,coeff), dtype=float)
-    b = np.empty(n, dtype=float)
-    code = """
-    if (Xfnct_offset == 1) {
-        for (int i=0; i<n; ++i) {
-            for (int k=0; k<coeff; ++k) {
-            if (k==0)
-                a(i,coeff-1-k) = 1/err(i);
-            else if (k==1)
-                a(i,coeff-1-k) = Xfnct(i)/err(i);
-            else
-                a(i,coeff-1-k) = a(i,coeff-k)*x(i);
-            }
-            b(i) = y(i)/err(i);
-        }
-    }
-    else {
-        for (int i=0; i<n; ++i) {
-            for (int k=0; k<coeff; ++k) {
-            if (k==0)
-                a(i,coeff-1-k) = Xfnct(i)/err(i);
-            else
-                a(i,coeff-1-k) = a(i,coeff-k)*x(i);
-            }
-            //std::cout << y(i) << " " << err(i) << std::endl;
-            b(i) = y(i)/err(i);
-        }
-    }
-    """
-    prep_lstsq = weave.inline(code, ['y', 'x', 'err', 'Xfnct', 'Xfnct_offset', 'a', 'b', 'n', 'coeff'], type_converters=weave.converters.blitz, compiler='gcc')
-    tmp = prep_lstsq
-    tmp = np.linalg.lstsq(a, b)
+    if Xfnct_offset == 1:
+        if coeff > 1:
+            powers = np.arange(coeff-2, -1, -1)
+            a[:,:coeff-1] = base[:,None] * (x[:,None] ** powers[None,:])
+        a[:,coeff-1] = 1./err
+    else:
+        powers = np.arange(coeff-1, -1, -1)
+        a[:,:] = base[:,None] * (x[:,None] ** powers[None,:])
+    b = y/err
+    tmp = np.linalg.lstsq(a, b, rcond=None)
     if chi2:
         return tmp[0], tmp[1][0]
     return tmp[0]
@@ -478,45 +402,17 @@ def Interp_linear(y, x, xnew):
     xnew = np.ascontiguousarray(xnew, dtype=float)
     n_old = x.size
     n_new = xnew.size
-    ynew = np.empty(n_new, dtype=float)
-    code = """
-    #pragma omp parallel shared(x,xnew,y,ynew,n_old,n_new) default(none)
-    {
-    int jl, ju, jm, j;
-    double w;
-    bool ascending = x(n-1) > x(0);
-    #pragma omp for
-    //std::cout << n_new << std::endl;
-    for (int i=0; i<n_new; ++i) {
-       //std::cout << i << " " << xnew(i) << std::endl;
-       jl = 0;
-       ju = n_old;
-       while ((ju-jl) > 1)
-       {
-           //std::cout << "+++" << std::endl;
-           //std::cout << jl << " " << ju << " " << jm << std::endl;
-           jm = (ju+jl)/2;
-           //std::cout << i << " " << xnew(i) << " " << x(jm) << std::endl;
-           if (ascending == (xnew(i) > x(jm)))
-               jl = jm;
-           else
-               ju = jm;
-           //std::cout << jl << " " << ju << " " << jm << std::endl;
-       }
-       j = (jl < (n_old-1) ? jl : n_old-2);
-       w = (xnew(i)-x(j))/(x(j+1)-x(j));
-       ynew(i) = y(j)*(1-w) + y(j+1)*w;
-    }
-    }
-    """
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Same bisection search as Getaxispos_vector,
+    ## directly evaluating the linearly-interpolated y values.
+    ascending = x[-1] > x[0]
+    if ascending:
+        j = np.searchsorted(x, xnew, side='right') - 1
     else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_axispos = weave.inline(code, ['x', 'xnew', 'y', 'ynew', 'n_old', 'n_new'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, verbose=2)
-    tmp = get_axispos
+        j = (n_old - 1) - np.searchsorted(x[::-1], xnew, side='left')
+    j = np.clip(j, 0, n_old-2)
+    w = (xnew - x[j]) / (x[j+1] - x[j])
+    ynew = y[j]*(1-w) + y[j+1]*w
     logger.log(5, "end")
     return ynew
 
@@ -531,61 +427,18 @@ def Interp_linear2(y, weights, inds):
     >>> weights,indices = Getaxispos_scalar(x, xnew)
     >>> ynew = Utils.Interp_integrate(y, weights, indices)
     """
-    code1d = """
-    #pragma omp parallel shared(ynew, y, weights, inds) default(none)
-    {
-    double w1, w0;
-    int j0, j1;
-    #pragma omp for
-    for (int i=0; i<nynew; i++) {
-        w1 = weights(i);
-        w0 = 1.-w1;
-        j0 = inds(i);
-        j1 = 1+j0;
-        ynew(i) = y(j0)*w0 + y(j1)*w1;
-    }
-    }
-    """
-    code2d = """
-    #pragma omp parallel shared(ynew, y, weights, inds) default(none)
-    {
-    double w1, w0;
-    int j0, j1;
-    #pragma omp for
-    for (int j=0; j<n; j++) {
-        for (int i=0; i<nynew; i++) {
-            w1 = weights(i);
-            w0 = 1.-w1;
-            j0 = inds(i);
-            j1 = 1+j0;
-            ynew(j,i) = y(j,j0)*w0 + y(j,j1)*w1;
-        }
-    }
-    }
-    """
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available): a simple gather + weighted sum.
     y = np.ascontiguousarray(y, dtype=float)
     weights = np.ascontiguousarray(weights, dtype=float)
     inds = np.ascontiguousarray(inds, dtype=int)
-    nynew = weights.size
     if y.ndim == 1:
-        ynew = np.empty(nynew, dtype=float)
-        code = code1d
-        args = ['y', 'ynew', 'weights', 'inds', 'nynew']
+        ynew = y[inds]*(1.-weights) + y[inds+1]*weights
     elif y.ndim == 2:
-        n = y.shape[0]
-        ynew = np.empty((n,nynew), dtype=float)
-        code = code2d
-        args = ['y', 'ynew', 'weights', 'inds', 'nynew', 'n']
+        ynew = y[:,inds]*(1.-weights)[None,:] + y[:,inds+1]*weights[None,:]
     else:
         print("Number of dimensions > 2 not supported!")
         return
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    interp = weave.inline(code, args, type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
     return ynew
 
 def Interp_linear_integrate(y, x, xnew):
