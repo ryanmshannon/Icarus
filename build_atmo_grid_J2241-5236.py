@@ -86,7 +86,14 @@ RAW_DIR = 'atmo_grid_raw_J2241-5236'          # intermediate (temp,logg,flux) ta
 BANDS = ['g', 'r', 'i']
 TEMP_MIN = 2000.                               # K
 TEMP_MAX = 12500.                              # K -- brackets Tnight/Tday with margin
-LOGG_LIMS = [3.0, 5.5]
+## The phoenixp05 CDBS grid only has real data for log g = 3.0-4.5 across the
+## full temperature range; the g50/g55 columns are identically zero for every
+## T > 2900 K. Including them would put log(0) = -inf planes in the grid, and
+## since the modelled surface spans log g ~ 4.3-4.6 (straddling 4.5), roughly
+## half the surface elements would interpolate against -inf and contribute
+## exactly zero flux. Capping at 4.5 makes Icarus mildly extrapolate instead,
+## which is far better behaved.
+LOGG_LIMS = [3.0, 4.5]
 C_ANGSTROM_PER_S = 2.99792458e18               # speed of light, Angstrom/s
 
 
@@ -177,12 +184,30 @@ def build_hdf5_grids(raw_flns, filters):
     zp = -48.60  # standard AB zero-point (flux already in F_nu, erg/s/cm^2/Hz)
     for band in BANDS:
         wav_filt, resp_filt = filters[band]
-        pivot_micron = pivot_wavelength(wav_filt, resp_filt) * 1e-4
-        width_micron = effective_width(wav_filt, resp_filt) * 1e-4
+        pivot_angstrom = pivot_wavelength(wav_filt, resp_filt)
+        width_angstrom = effective_width(wav_filt, resp_filt)
+        pivot_micron = pivot_angstrom * 1e-4
+        ## NOTE: Atmo_phot_BTSettl7 expects `wav`/`dwav` in CENTIMETRES -- it
+        ## internally does self.wav*1e4 to get microns for the limb-darkening
+        ## law (Utils.Flux.Limb_darkening) and self.wav*1e8 to get Angstroms.
+        ## Passing microns here instead would evaluate the Neckel (2005) law
+        ## at ~4700 microns rather than ~0.47 micron, which silently returns a
+        ## nearly wavelength-independent and far too weak limb darkening
+        ## (centre-to-limb ratio ~0.75 instead of ~0.19 in g).
+        pivot_cm = pivot_angstrom * 1e-8
+        width_cm = width_angstrom * 1e-8
         ext = float(Extinction(np.array([pivot_micron]), Rv=3.1))
 
-        atmo = Atmo_phot_BTSettl7(raw_flns[band], wav=pivot_micron, dwav=width_micron,
+        atmo = Atmo_phot_BTSettl7(raw_flns[band], wav=pivot_cm, dwav=width_cm,
                                    zp=zp, ext=ext, logg_lims=LOGG_LIMS, AB=True)
+
+        if not np.isfinite(atmo.grid).all():
+            raise RuntimeError(
+                "Band {}: {} non-finite values in the grid. This means the "
+                "underlying model spectra were zero/missing for some "
+                "(Teff, logg) combination -- check LOGG_LIMS against the "
+                "coverage of the model grid.".format(
+                    band, int((~np.isfinite(atmo.grid)).sum())))
 
         grid_phot = AtmoGridPhot(data=atmo.grid,
                                   cols=[('logtemp', atmo.logtemp), ('logg', atmo.logg), ('mu', atmo.mu)],
