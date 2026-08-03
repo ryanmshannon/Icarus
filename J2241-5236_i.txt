@@ -23,25 +23,28 @@
 #        brightness). This is offset by 0.25 from Icarus's own convention
 #        (primary/modelled-star inferior conjunction = phase 0); see the
 #        phase_shift column in data_J2241-5236.txt, which corrects for it.
-# Col 1: magnitude
-# Col 2: magnitude error
-0.00  22.625  0.10
-0.05  23.050  0.10
-0.10  23.434  0.10
-0.15  23.737  0.15
-0.20  23.933  0.15
-0.25  24.000  0.15
-0.30  23.933  0.15
-0.35  23.737  0.15
-0.40  23.434  0.10
-0.45  23.050  0.08
-0.50  22.625  0.08
-0.55  22.200  0.06
-0.60  21.816  0.05
-0.65  21.513  0.05
-0.70  21.317  0.05
-0.75  21.250  0.05
-0.80  21.317  0.05
-0.85  21.513  0.05
-0.90  21.816  0.06
-0.95  22.200  0.08
+# J2241-5236 i-band photometry, digitized from phase-folded light curve figure
+# Columns: phase  mag  mag_err
+# Note: values are approximate, extracted via pixel digitization of the plot.
+# mag_err is symmetric: mean of the up/down pixel-measured error extents.
+0.3564  23.6254  0.0808
+0.4458  22.7393  0.0889
+0.5125  22.1892  0.0727
+0.6652  21.4202  0.0566
+0.7161  21.3896  0.1293
+0.7496  21.2917  0.1859
+0.8258  21.3837  0.0727
+0.8764  21.5294  0.1051
+0.8861  21.4225  0.1373
+0.9092  21.6533  0.0485
+0.9273  21.7811  0.1212
+0.9554  21.9470  0.0727
+1.3551  23.6217  0.0808
+1.6534  21.4534  0.0404
+1.7126  21.3802  0.1212
+1.7515  21.2900  0.1535
+1.8231  21.3806  0.0727
+1.8773  21.5007  0.1132
+1.9097  21.6568  0.1212
+1.9263  21.7846  0.1212
+1.9547  21.9455  0.0889

@@ -19,32 +19,28 @@
 # NOT for scientific analysis. Replace with the real data (contact the
 # authors) before drawing any physical conclusions.
 #
-# Col 0: orbital phase (0-1), in the PAPER's own convention: phase 0.75 is
-#        where the pulsar is at inferior conjunction (heated day side of
-#        the companion faces us, maximum brightness); phase 0.25 is
-#        companion inferior conjunction (night side faces us, minimum
-#        brightness). This is offset by 0.25 from Icarus's own convention
-#        (primary/modelled-star inferior conjunction = phase 0); see the
-#        phase_shift column in data_J2241-5236.txt, which corrects for it.
-# Col 1: magnitude
-# Col 2: magnitude error
-0.00  23.700  0.15
-0.05  24.318  0.15
-0.10  24.876  0.20
-0.15  25.318  0.30
-0.20  25.602  0.40
-0.25  25.700  0.55
-0.30  25.602  0.55
-0.35  25.318  0.40
-0.40  24.876  0.25
-0.45  24.318  0.15
-0.50  23.700  0.10
-0.55  23.082  0.08
-0.60  22.524  0.06
-0.65  22.082  0.06
-0.70  21.798  0.05
-0.75  21.700  0.05
-0.80  21.798  0.05
-0.85  22.082  0.06
-0.90  22.524  0.08
-0.95  23.082  0.10
+# J2241-5236 r-band photometry, digitized from phase-folded light curve figure
+# Columns: phase  mag  mag_err
+# Note: values are approximate, extracted via pixel digitization of the plot.
+# mag_err is symmetric: mean of the up/down pixel-measured error extents.
+0.3020  25.0841  0.4929
+0.3232  25.5293  0.0243
+0.3408  25.0031  0.5495
+0.4063  24.0816  0.0728
+0.4529  23.4817  0.1132
+0.4809  22.9994  0.0323
+0.5050  22.9190  0.0646
+0.6752  21.9131  0.0323
+0.7979  21.7318  0.0485
+0.9047  22.1293  0.0646
+1.2994  25.0880  0.4929
+1.3241  25.5206  0.1131
+1.3425  25.0032  0.1212
+1.4049  24.0714  0.0404
+1.4523  23.4834  0.1051
+1.4786  23.2088  0.0566
+1.4927  22.9680  0.0646
+1.6752  21.9212  0.0242
+1.7907  21.7089  0.0404
+1.9058  22.1325  0.0485
+ 
