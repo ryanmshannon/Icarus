@@ -49,14 +49,22 @@ wavelength, so it is self-consistent with how Icarus.Photometry applies the
 
 IMPORTANT CAVEATS -- read before using for science
 ---------------------------------------------------
-- Because model_J2241-5236.py's photometry (data_J2241-5236.txt) is itself
-  digitized-by-eye placeholder data (see that file's header), and
-  Icarus.Photometry.Calc_chi2(..., do_offset=True) fits a free per-band
-  offset plus distance modulus/extinction, any overall zero-point error in
-  this grid is absorbed by the fit and does not affect that mock/test
-  script. Do NOT assume the grid's absolute flux calibration is accurate
-  enough for real absolute photometry without independent validation (e.g.
-  against a spectrophotometric standard such as Vega).
+- ABSOLUTE CALIBRATION. The grid is in physical units, not relative ones.
+  The CDBS spectra are true surface fluxes (verified: integral F_lam dlam
+  reproduces sigma*T^4), and because Icarus expresses surface areas in
+  units of orbital separation^2 while Star._Proj supplies (a/10pc)^2, the
+  resulting magnitudes are ABSOLUTE magnitudes -- which is exactly why
+  Photometry.Calc_chi2 can fit a distance modulus on top of them.
+  The known systematic is the surface-flux -> specific-intensity
+  conversion: Atmo_photo_BTSettl7 uses a hardcoded 4/pi^2 factor that is
+  only exactly consistent with the limb-darkening law where the integral
+  of LD(mu)*mu dmu equals pi/8, i.e. near 5000 A. The reconstructed
+  surface flux is off by about -5% at 4300 A (g), +5% at 6200 A (r) and
+  +9% at 7500 A (i) -- a smooth, band-dependent systematic of order
+  0.05-0.1 mag in colour. For the mock/test use of this script that is
+  harmless, since Calc_chi2(..., do_offset=True) fits a free per-band
+  offset which absorbs it; for real absolute photometry it should be
+  checked against a spectrophotometric standard such as Vega.
 - Metallicity is fixed at [M/H]=+0.5 (the phoenixp05 grid); the true
   companion metallicity is unknown and not fit for.
 - Limb darkening is Atmo_photo_BTSettl7's built-in analytic approximation,
@@ -231,7 +239,8 @@ def write_index_file():
         f.write("# Built by build_atmo_grid_J2241-5236.py from the PHOENIX/BT-Settl\n")
         f.write("# phoenixp05 grid and SVO SDSS g/r/i filter curves. See that script's\n")
         f.write("# docstring for the method used and important caveats (metallicity fixed\n")
-        f.write("# at [M/H]=+0.5, absolute flux zero-point not independently validated).\n")
+        f.write("# at [M/H]=+0.5; grid is in absolute-magnitude units, with a\n")
+        f.write("# wavelength-dependent ~5-10% intensity-normalization systematic).\n")
         for band in BANDS:
             f.write("{}  atmo_grid_J2241-5236_{}.h5\n".format(band, band))
     print("Wrote {}.".format(fln))
