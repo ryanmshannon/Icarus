@@ -1,42 +1,50 @@
 # Approximate/digitized r-band photometry for PSR J2241-5236
 # DIGITIZED BY EYE from Figure 5 of Draghis, Romani, Filippenko, Brink,
-# Zheng, Halpern & Camilo 2019, ApJ (arXiv:1908.00992), 'Multiband
-# Optical Light Curves of Black-Widow Pulsars'.
+# Zheng, Halpern & Camilo 2019, ApJ, 883, 1 (arXiv:1908.00992),
+# "Multiband Optical Light Curves of Black-Widow Pulsars"
+# (https://doi.org/10.3847/1538-4357/ab378b), using the actual Figure 5
+# panel (LCO/SOAR/GMOS g,r,i vs. orbital phase) provided by the user.
 #
 # IMPORTANT: the paper does NOT publish a numeric photometry table for
 # J2241-5236 (checked Table 2/3, main text, and the PDF for a machine-
 # readable table -- none exists; Fig. 5 is the only place the light curve
 # appears, as a plot of g/r/i magnitude vs. orbital phase).
-# These values were read off the plotted points/curve by eye and are NOT
-# the authors' real measurements. Magnitudes are approximate to roughly
-# +/-0.1-0.3 mag depending on phase, and the per-point errors below are
-# rough guesses matching the visual scatter, not the true reported
-# uncertainties.
+# These values were read off the plotted points/curve by eye (fit to the
+# model curve shape plus representative error bars matching what is
+# visually shown) and are NOT the authors' real measurements. Note the
+# r-band minimum in the figure is very deep and poorly constrained (large
+# error bars reaching well below mag 25.5); the values/errors here near
+# phase 0.25 reflect that.
 # Suitable ONLY for exercising the Icarus fitting pipeline end-to-end,
 # NOT for scientific analysis. Replace with the real data (contact the
 # authors) before drawing any physical conclusions.
 #
-# Col 0: orbital phase (0-1; phase 0.75 = pulsar inferior conjunction /
-#        near companion maximum brightness, per the paper's convention)
+# Col 0: orbital phase (0-1), in the PAPER's own convention: phase 0.75 is
+#        where the pulsar is at inferior conjunction (heated day side of
+#        the companion faces us, maximum brightness); phase 0.25 is
+#        companion inferior conjunction (night side faces us, minimum
+#        brightness). This is offset by 0.25 from Icarus's own convention
+#        (primary/modelled-star inferior conjunction = phase 0); see the
+#        phase_shift column in data_J2241-5236.txt, which corrects for it.
 # Col 1: magnitude
 # Col 2: magnitude error
-0.00  23.760  0.145
-0.05  24.130  0.206
-0.10  24.205  0.274
-0.15  24.623  0.338
-0.20  24.716  0.384
-0.25  24.423  0.400
-0.30  24.617  0.384
-0.35  24.567  0.338
-0.40  24.372  0.274
-0.45  24.095  0.206
-0.50  23.667  0.145
-0.55  23.311  0.101
-0.60  22.846  0.074
-0.65  22.412  0.063
-0.70  22.208  0.060
-0.75  22.118  0.060
-0.80  22.168  0.060
-0.85  22.453  0.063
-0.90  22.835  0.074
-0.95  23.287  0.101
+0.00  23.700  0.15
+0.05  24.318  0.15
+0.10  24.876  0.20
+0.15  25.318  0.30
+0.20  25.602  0.40
+0.25  25.700  0.55
+0.30  25.602  0.55
+0.35  25.318  0.40
+0.40  24.876  0.25
+0.45  24.318  0.15
+0.50  23.700  0.10
+0.55  23.082  0.08
+0.60  22.524  0.06
+0.65  22.082  0.06
+0.70  21.798  0.05
+0.75  21.700  0.05
+0.80  21.798  0.05
+0.85  22.082  0.06
+0.90  22.524  0.08
+0.95  23.082  0.10

@@ -2,12 +2,22 @@
 # Format (9-column, 'preferred'): band  phase_col  mag_col  err_col  phase_shift  calib_err  softening  flag  filename
 #
 # WARNING: the per-band data files referenced below (J2241-5236_g/r/i.txt)
-# contain photometry DIGITIZED BY EYE from Figure 5 of Draghis et al. 2019
-# (arXiv:1908.00992), because that paper does not publish a numeric
-# photometry table for PSR J2241-5236. Treat as placeholder/test data only --
-# see the per-band files for details, and replace with real data before any
-# science use.
+# contain photometry DIGITIZED BY EYE from Figure 5 of Draghis et al. 2019,
+# ApJ, 883, 1 (arXiv:1908.00992; https://doi.org/10.3847/1538-4357/ab378b),
+# because that paper does not publish a numeric photometry table for
+# PSR J2241-5236. Treat as placeholder/test data only -- see the per-band
+# files for details, and replace with real data before any science use.
 #
-g  0  1  2  0.00  0.03  0.  mag  J2241-5236_g.txt
-r  0  1  2  0.00  0.03  0.  mag  J2241-5236_r.txt
-i  0  1  2  0.00  0.03  0.  mag  J2241-5236_i.txt
+# phase_shift = 0.25: the per-band files use the PAPER's phase convention
+# (phase 0.75 = pulsar inferior conjunction / maximum brightness, phase
+# 0.25 = companion inferior conjunction / minimum brightness), which is
+# offset by 0.25 from Icarus's own convention (Photometry._Read_data
+# stores phase = raw_phase - phase_shift, and Icarus expects phase 0 to be
+# the modelled star's -- i.e. the companion's -- inferior conjunction, so
+# minimum brightness). Without this shift, Icarus would fit the model
+# light curve 0.25 out of phase with the data (model minimum at phase 0
+# instead of the data's minimum at phase 0.25).
+#
+g  0  1  2  0.25  0.03  0.  mag  J2241-5236_g.txt
+r  0  1  2  0.25  0.03  0.  mag  J2241-5236_r.txt
+i  0  1  2  0.25  0.03  0.  mag  J2241-5236_i.txt
