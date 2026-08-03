@@ -270,10 +270,10 @@ def Hsr_c(faces_b, vertices_b, r_vertices_b, assoc_b, faces_f, vertices_f, r_ver
     n_vertices_b = vertices_b.shape[0]
     n_vertices_f = vertices_f.shape[0]
     n_faces_b = faces_b.shape[0]
-    incl = np.float(incl)
-    q = np.float(q)
-    rmax_f = np.float(rmax_f)
-    rmin_f = np.float(rmin_f)
+    incl = float(incl)
+    q = float(q)
+    rmax_f = float(rmax_f)
+    rmin_f = float(rmin_f)
     weight = np.zeros(n_faces_b, dtype=float)
     #extra_compile_args = extra_link_args = ['-O3 -fopenmp']
     extra_compile_args = extra_link_args = ['']
@@ -374,10 +374,10 @@ def Occultation_approx(vertices, r_vertices, assoc, n_faces, incl, orbph, q, nth
     assoc = np.ascontiguousarray(assoc, dtype=float)
     r_vertices = np.ascontiguousarray(r_vertices, dtype=float)
     radii = np.ascontiguousarray(radii, dtype=float)
-    incl = np.float(incl)
-    orbph = np.float(orbph)
-    q = np.float(q)
-    ntheta = np.int(ntheta)
+    incl = float(incl)
+    orbph = float(orbph)
+    q = float(q)
+    ntheta = int(ntheta)
     n_vertices = vertices.shape[0]
     weight = np.zeros(n_faces, dtype=float)
     try:
@@ -586,7 +586,7 @@ def Weights_transit(inds_highres, weight_highres, n_lowres):
 
     inds_highres = np.ascontiguousarray(inds_highres, dtype=float)
     weight_highres = np.ascontiguousarray(weight_highres, dtype=float)
-    n_lowres = np.int(n_lowres)
+    n_lowres = int(n_lowres)
     n_highres = inds_highres.shape[0]
     weight_lowres = np.zeros(n_lowres, dtype=float)
     try:

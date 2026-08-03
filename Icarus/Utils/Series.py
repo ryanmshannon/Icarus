@@ -111,7 +111,7 @@ def Doppler_shift_spectrum(fref, wref, wobs, v):
     wref = np.ascontiguousarray(wref, dtype=float)
     fref = np.ascontiguousarray(fref, dtype=float)
     wobs = np.ascontiguousarray(wobs, dtype=float)
-    v = np.float(v)
+    v = float(v)
     nref = wref.size
     nobs = wobs.size
     fobs = np.empty(nobs, dtype=float)
@@ -187,9 +187,9 @@ def Doppler_shift_spectrum_integrate(fref, wobs, v, refstart, refstep):
     fbin = np.zeros(nobs, dtype=float)
     fref = np.ascontiguousarray(fref, dtype=float)
     wobs = np.ascontiguousarray(wobs, dtype=float)
-    v = np.float(v)
-    refstart = np.float(refstart)
-    refstep = np.float(refstep)
+    v = float(v)
+    refstart = float(refstart)
+    refstep = float(refstep)
     code = """
     #line 10
     //double refstart; // start wavelength of the reference spectrum
@@ -344,7 +344,7 @@ def Getaxispos_scalar(xold, xnew):
     return_val = results;
     """
     xold = np.ascontiguousarray(xold, dtype=float)
-    xnew = np.float(xnew)
+    xnew = float(xnew)
     n = xold.shape[0]
     get_axispos = weave.inline(code, ['xold', 'xnew', 'n'], type_converters=weave.converters.blitz, compiler='gcc', verbose=2)
     w,j = get_axispos
@@ -365,46 +365,18 @@ def Getaxispos_vector(xold, xnew):
     xold = np.ascontiguousarray(xold, dtype=float)
     xnew = np.ascontiguousarray(xnew, dtype=float)
     n = xold.shape[0]
-    m = xnew.shape[0]
-    j = np.empty(m, dtype=int)
-    w = np.empty(m, dtype=float)
-    code = """
-    #pragma omp parallel shared(xold,xnew,n,m,j,w) default(none)
-    {
-    int jl, ju, jm;
-    double a;
-    bool ascending = xold(n-1) > xold(0);
-    #pragma omp for
-    //std::cout << m << std::endl;
-    for (int i=0; i<m; ++i) {
-       //std::cout << i << " " << xnew(i) << std::endl;
-       jl = 0;
-       ju = n;
-       while ((ju-jl) > 1)
-       {
-           //std::cout << "+++" << std::endl;
-           //std::cout << jl << " " << ju << " " << jm << std::endl;
-           jm = (ju+jl)/2;
-           //std::cout << i << " " << xnew(i) << " " << xold(jm) << std::endl;
-           if (ascending == (xnew(i) > xold(jm)))
-               jl = jm;
-           else
-               ju = jm;
-           //std::cout << jl << " " << ju << " " << jm << std::endl;
-       }
-       j(i) = (jl < (n-1) ? jl : n-2);
-       w(i) = (xnew(i)-xold(j(i)))/(xold(j(i)+1)-xold(j(i)));
-    }
-    }
-    """
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Equivalent to the bisection search it
+    ## replaces: for each xnew, finds j (clipped to [0, n-2]) such that
+    ## xold[j] and xold[j+1] bracket xnew (xold can be ascending or
+    ## descending), plus the fractional weight w for linear interpolation.
+    ascending = xold[-1] > xold[0]
+    if ascending:
+        j = np.searchsorted(xold, xnew, side='right') - 1
     else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_axispos = weave.inline(code, ['xold', 'xnew', 'n', 'm', 'j', 'w'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, verbose=2)
-    tmp = get_axispos
+        j = (n - 1) - np.searchsorted(xold[::-1], xnew, side='left')
+    j = np.clip(j, 0, n-2)
+    w = (xnew - xold[j]) / (xold[j+1] - xold[j])
     logger.log(5, "end")
     return w,j
 

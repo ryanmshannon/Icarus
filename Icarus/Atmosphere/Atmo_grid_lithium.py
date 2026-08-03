@@ -230,7 +230,7 @@ class Atmo_grid_lithium(Atmo_grid):
             wav = new_wav
             grid = grid.take(inds, axis=-1)*(1-ws) + grid.take(inds+1, axis=-1)*ws
         else:
-            self.z0 = np.float(wav[1]/wav[0] - 1)
+            self.z0 = float(wav[1]/wav[0] - 1)
         if convert is not None:
             print('Saving the data into '+fln+convert)
             np.savetxt(fln+convert,np.vstack((wav,np.log10(grid))).T)

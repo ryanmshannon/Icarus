@@ -135,15 +135,20 @@ def Interp_photometry(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu):
     jmu = np.ascontiguousarray(jmu, dtype=int)
     area = np.ascontiguousarray(area, dtype=float)
     val_mu = np.ascontiguousarray(val_mu, dtype=float)
-    nsurf = jteff.size
-    if os.uname()[0] == 'Darwin':
-        extra_compile_args = extra_link_args = ['-O3']
-        headers = ['<cmath>']
-    else:
-        extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        headers = ['<omp.h>','<cmath>']
-    get_flux = weave.inline(code, ['grid', 'wteff', 'wlogg', 'wmu', 'jteff', 'jlogg', 'jmu', 'area', 'val_mu', 'nsurf'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=headers, libraries=['m'], verbose=2)
-    fl = get_flux
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Vectorized trilinear interpolation over the
+    ## (logtemp, logg, mu) grid, identical to the C code it replaces.
+    w1teff, w0teff = wteff, 1.-wteff
+    j0teff, j1teff = jteff, jteff+1
+    w1logg, w0logg = wlogg, 1.-wlogg
+    j0logg, j1logg = jlogg, jlogg+1
+    w1mu, w0mu = wmu, 1.-wmu
+    j0mu, j1mu = jmu, jmu+1
+    tmp_fl = w1mu*(w0logg*(w0teff*grid[j0teff,j0logg,j1mu] + w1teff*grid[j1teff,j0logg,j1mu])
+                  + w1logg*(w0teff*grid[j0teff,j1logg,j1mu] + w1teff*grid[j1teff,j1logg,j1mu])) \
+           + w0mu*(w0logg*(w0teff*grid[j0teff,j0logg,j0mu] + w1teff*grid[j1teff,j0logg,j0mu])
+                  + w1logg*(w0teff*grid[j0teff,j1logg,j0mu] + w1teff*grid[j1teff,j1logg,j0mu]))
+    fl = float(np.sum(np.exp(tmp_fl) * area * val_mu))
     return fl
 
 def Interp_photometry_doppler(grid, wteff, wlogg, wmu, jteff, jlogg, jmu, area, val_mu, val_vel, grid_doppler):

@@ -398,7 +398,7 @@ class AtmoGrid(Column):
             raise Exception("h5py is needed for ReadHDF5")
         f = h5py.File(fln, 'r')
 
-        flux = np.ascontiguousarray(f['flux'].value, dtype=float)
+        flux = np.ascontiguousarray(f['flux'][()], dtype=float)
 
         meta = {}
         for key_attrs, val_attrs in f.attrs.items():
@@ -411,7 +411,7 @@ class AtmoGrid(Column):
         grp = f['cols']
         for col in colnames:
             dset = grp[col]
-            cols.append( Column(data=np.ascontiguousarray(dset.value), name=col, meta=dict(dset.attrs.items())) )
+            cols.append( Column(data=np.ascontiguousarray(dset[()]), name=col, meta=dict(dset.attrs.items())) )
         cols = TableColumns(cols)
 
         f.close()
@@ -497,9 +497,9 @@ class AtmoGrid(Column):
         f = h5py.File(fln, 'w')
 
         f.create_dataset(name='flux', data=self.data)
-        f.attrs['colnames'] = self.cols.keys()
-        f.attrs['name'] = self.name
-        f.attrs['description'] = self.description
+        f.attrs['colnames'] = [str(k) for k in self.cols.keys()]
+        f.attrs['name'] = self.name if self.name is not None else ''
+        f.attrs['description'] = self.description if self.description is not None else ''
 
         for key_attrs, val_attrs in self.meta.items():
             f.attrs[key_attrs] = val_attrs

@@ -270,7 +270,7 @@ def Make_geodesic(n):
 
     free_memory();
     """
-    n = np.int(n)
+    n = int(n)
     n_faces = 20 * 4**n
     myfaces = np.empty((n_faces,3), dtype=int)
     n_vertices = 2 + 10 * 4**n
@@ -303,10 +303,18 @@ def Match_assoc(faces, n_vertices):
     }
     """
     faces = np.ascontiguousarray(faces, dtype=int)
-    n_vertices = np.int(n_vertices)
+    n_vertices = int(n_vertices)
     n_faces = faces.shape[0]
-    assoc = -99 * np.ones((n_vertices,6), dtype=np.int)
-    get_assoc = weave.inline(code, ['n_faces','faces','assoc'], type_converters=weave.converters.blitz, compiler='gcc', libraries=['m'], verbose=2, force=0)
+    assoc = -99 * np.ones((n_vertices,6), dtype=int)
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). For each vertex, list (in face order) the
+    ## indices of the faces it belongs to, padded with -99 up to 6 slots.
+    count = np.zeros(n_vertices, dtype=int)
+    for i in range(n_faces):
+        for j in range(3):
+            ind = faces[i, j]
+            assoc[ind, count[ind]] = i
+            count[ind] += 1
     return assoc
 
 def Match_triangles(high_x, high_y, high_z, low_x, low_y, low_z):

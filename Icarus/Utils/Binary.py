@@ -262,15 +262,43 @@ def Radius(cosx, cosy, cosz, psi0, r, q, qp1by2om2):
     } while (fabs(dr) > 0.00001);
     return_val = r;
     """
-    psi0 = np.float(psi0)
-    r = np.float(r)
-    q = np.float(q)
-    cosx = np.float(cosx)
-    cosy = np.float(cosy)
-    cosz = np.float(cosz)
-    qp1by2om2 = np.float(qp1by2om2)
-    get_radius = weave.inline(code, ['r', 'cosx', 'cosy', 'cosz', 'psi0', 'q', 'qp1by2om2'], type_converters=weave.converters.blitz, compiler='gcc', verbose=2)
-    r = get_radius
+    psi0 = float(psi0)
+    r = float(r)
+    q = float(q)
+    cosx = float(cosx)
+    cosy = float(cosy)
+    cosz = float(cosz)
+    qp1by2om2 = float(qp1by2om2)
+    ## Pure-Python replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Newton-Raphson search for the radius,
+    ## identical to the C code it replaces.
+    i = 0
+    nmax = 50
+    while True:
+        i += 1
+        if i > nmax:
+            r = -99.99
+            break
+        x = r*cosx
+        y = r*cosy
+        z = r*cosz
+        rc2 = x*x+y*y+z*z
+        rc = np.sqrt(rc2)
+        rx = np.sqrt(rc2+1-2*x)
+        rx3 = rx*rx*rx
+        psi = 1/rc + q/rx - q*x + qp1by2om2*(rc2-z*z)
+        dpsi = -1/(rc*rc*rc)-q/rx3
+        dpsidx = x*(dpsi+2*qp1by2om2)+q*(1/rx3-1)
+        dpsidy = y*(dpsi+2*qp1by2om2)
+        dpsidz = z*dpsi
+        dpsidr = dpsidx*cosx+dpsidy*cosy+dpsidz*cosz
+        dr = (psi-psi0)/dpsidr
+        if (r - dr) < 0.0:
+            r = 0.5 * r
+        else:
+            r = r - dr
+        if abs(dr) <= 0.00001:
+            break
     logger.log(9, "end")
     return r
 
@@ -322,21 +350,47 @@ def Radii(cosx, cosy, cosz, psi0, r, q, qp1by2om2):
     cosx = np.ascontiguousarray(cosx, dtype=float)
     cosy = np.ascontiguousarray(cosy, dtype=float)
     cosz = np.ascontiguousarray(cosz, dtype=float)
-    psi0 = np.float(psi0)
-    r = np.float(r)
-    q = np.float(q)
-    qp1by2om2 = np.float(qp1by2om2)
+    psi0 = float(psi0)
+    r = float(r)
+    q = float(q)
+    qp1by2om2 = float(qp1by2om2)
     n = cosx.size
-    rout = np.empty(n, dtype=float)
-    try:
-        if os.uname()[0] == 'Darwin':
-            extra_compile_args = extra_link_args = ['-O3']
-        else:
-            extra_compile_args = extra_link_args = ['-O3 -fopenmp']
-        get_radius = weave.inline(code, ['r', 'cosx', 'cosy', 'cosz', 'psi0', 'q', 'qp1by2om2', 'rout', 'n'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=extra_compile_args, extra_link_args=extra_link_args, headers=['<omp.h>'], verbose=2)
-    except:
-        get_radius = weave.inline(code, ['r', 'cosx', 'cosy', 'cosz', 'psi0', 'q', 'qp1by2om2', 'rout', 'n'], type_converters=weave.converters.blitz, compiler='gcc', extra_compile_args=['-O3'], extra_link_args=['-O3'], verbose=2)
-    r = get_radius
+    ## Pure-NumPy replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Vectorized Newton-Raphson: identical
+    ## per-element algorithm to the C code it replaces, all points iterated
+    ## together with a mask to stop updating points that have converged
+    ## (dr small) or hit the iteration cap (flagged with -99.99).
+    rout = np.full(n, r, dtype=float)
+    active = np.ones(n, dtype=bool)
+    i = 0
+    nmax = 50
+    while active.any():
+        i += 1
+        if i > nmax:
+            rout[active] = -99.99
+            break
+        ra = rout[active]
+        cxa, cya, cza = cosx[active], cosy[active], cosz[active]
+        x = ra*cxa
+        y = ra*cya
+        z = ra*cza
+        rc2 = x*x+y*y+z*z
+        rc = np.sqrt(rc2)
+        rx = np.sqrt(rc2+1-2*x)
+        rx3 = rx*rx*rx
+        psi = 1/rc + q/rx - q*x + qp1by2om2*(rc2-z*z)
+        dpsi = -1/(rc*rc*rc)-q/rx3
+        dpsidx = x*(dpsi+2*qp1by2om2)+q*(1/rx3-1)
+        dpsidy = y*(dpsi+2*qp1by2om2)
+        dpsidz = z*dpsi
+        dpsidr = dpsidx*cxa+dpsidy*cya+dpsidz*cza
+        dr = (psi-psi0)/dpsidr
+        neg = (ra - dr) < 0.0
+        ra = np.where(neg, 0.5*ra, ra - dr)
+        rout[active] = ra
+        converged = np.abs(dr) <= 0.00001
+        active_inds = active.nonzero()[0]
+        active[active_inds[converged]] = False
     logger.log(9, "end")
     return rout
 
@@ -380,11 +434,22 @@ def Saddle(x, q, qp1by2om2):
         } while (fabs(dx/x) > 0.00001);
         return_val = x;
         """
-    x = np.float(x)
-    q = np.float(q)
-    qp1by2om2 = np.float(qp1by2om2)
-    qp1by2om2 = np.float(qp1by2om2)
-    get_saddle = weave.inline(code, ['x', 'q', 'qp1by2om2'], type_converters=weave.converters.blitz, compiler='gcc', verbose=2)
-    x = get_saddle
+    x = float(x)
+    q = float(q)
+    qp1by2om2 = float(qp1by2om2)
+    ## Pure-Python replacement for the weave.inline block above (scipy.weave
+    ## is no longer available). Newton-Raphson search for the L1 saddle
+    ## point, identical to the C code it replaces.
+    while True:
+        rc = abs(x)
+        rx = np.sqrt(rc*rc+1-2*x)
+        rx3 = rx*rx*rx
+        dpsi = -1/(rc*rc*rc)-q/rx3
+        dpsidx = x*(dpsi+2*qp1by2om2)+q*(1/rx3-1)
+        d2psidx2 = dpsi+3*(x*x/(rc*rc*rc*rc*rc)+q*(x-1)*(x-1)/(rx*rx*rx*rx*rx))+2*qp1by2om2
+        dx = -dpsidx/d2psidx2
+        x = x+dx
+        if abs(dx/x) <= 0.00001:
+            break
     logger.log(9, "end")
     return x
