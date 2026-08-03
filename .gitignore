@@ -48,3 +48,9 @@ Upload.sh
 
 # Large external reference data (BT-Settl/PHOENIX model spectra grid)
 model_spec/
+
+# Large regenerable build product: the spectroscopic atmosphere grid (~21 MB).
+# Rebuild with `python build_atmo_grid_spec_J2241-5236.py` (needs model_spec/).
+# The much smaller photometric grids (atmo_grid_J2241-5236_{g,r,i}.h5) are
+# tracked, since they are only ~50 KB each.
+atmo_grid_spec_J2241-5236.h5
