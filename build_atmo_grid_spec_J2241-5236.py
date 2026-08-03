@@ -41,22 +41,43 @@ Method
 
 IMPORTANT CAVEATS -- read before using for science
 ---------------------------------------------------
-- SPECTRAL RESOLUTION. The CDBS PHOENIX grid is heavily resampled: over
-  4300-9000 A its native sampling corresponds to R ~ 600-740, i.e. ~400-500
-  km/s per pixel. The companion's projected velocity semi-amplitude is only
-  ~350 km/s, so ALL velocity structure (line profiles, rotational
-  broadening, the orbital Doppler shift) is UNRESOLVED in this grid. The
-  computed spectrum is a valid phase-dependent SED, but it must NOT be used
-  for radial-velocity, line-profile or vsini work. For that, rebuild this
-  grid from the full-resolution BT-Settl spectra.
-- The wavelength range is restricted to WAV_MIN..WAV_MAX below, chosen to
-  stay inside the validity range of the Neckel (2005) limb-darkening law
-  (0.42257-1.100 micron), which Limb_darkening silently extrapolates
-  outside of.
+- SPECTRAL RESOLUTION. The CDBS PHOENIX grid is heavily resampled: its
+  native sampling is R ~ 740 (~405 km/s per pixel) from 4300 A out to
+  25000 A, and only R ~ 161 below 4300 A. The companion's projected
+  velocity semi-amplitude is only ~350 km/s, so ALL velocity structure
+  (line profiles, rotational broadening, the orbital Doppler shift) is
+  UNRESOLVED. X-shooter itself resolves R ~ 5000-9000, i.e. ~7-10x finer
+  than this grid, so the predicted spectrum is a valid phase-dependent SED
+  and is fine for predicting broad-band count rates or continuum shape,
+  but it must NOT be used to predict line profiles, equivalent widths,
+  radial velocities or vsini. For that, rebuild from the full-resolution
+  BT-Settl spectra.
+- LIMB-DARKENING EXTRAPOLATION. The Neckel (2005) law implemented by
+  Utils.Flux.Limb_darkening is only formally valid over 0.42257-1.100
+  micron; Limb_darkening silently extrapolates outside that range. The
+  X-shooter range used here therefore relies on extrapolation below
+  4226 A and, more substantially, over the whole NIR arm above 11000 A.
+  The extrapolation is smooth, monotonic and physically plausible (the
+  centre-to-limb ratio saturates from 0.51 at 1.1 micron to 0.65 at 2.48
+  micron, i.e. weaker limb darkening towards the IR, which is the correct
+  qualitative behaviour), but it is not a validated fit there.
 - Metallicity is fixed at [M/H] = +0.5 (the phoenixp05 grid); the true
   companion metallicity is unknown and is not fit for.
-- The absolute flux calibration is not independently validated (same
-  caveat as the photometric grids).
+- ABSOLUTE CALIBRATION. The grid is in physical units, not relative ones:
+  the CDBS spectra are true surface fluxes (verified: integral F_lam dlam
+  reproduces sigma*T^4), and Icarus' area/projection scaling makes
+  star.Flux_doppler return the flux density at a distance of 10 parsec.
+  Unlike the photometric grids, this grid does NOT use Icarus' hardcoded
+  4/pi^2 surface-flux -> specific-intensity factor by default. That factor
+  is only self-consistent with the limb-darkening law where the integral
+  of LD(mu)*mu dmu equals pi/8 (near 5000 A), and would recover only 86%
+  of the surface flux at 3000 A and 119% at 24800 A -- a 33% swing across
+  the X-shooter range that would visibly distort the predicted SED. This
+  script instead renormalizes per wavelength so the hemispheric integral
+  exactly reproduces the input surface flux (EXACT_LD_NORMALIZATION, set
+  to False to reproduce Icarus' behaviour). Consequently the absolute
+  scale of this grid differs from that of the photometric grids by that
+  same wavelength-dependent factor.
 
 >>> python build_atmo_grid_spec_J2241-5236.py
 """
@@ -77,12 +98,32 @@ OUT_FLN = 'atmo_grid_spec_J2241-5236.h5'
 TEMP_MIN = 2000.                 # K   (matches the photometric grid)
 TEMP_MAX = 12500.                # K
 LOGG_LIMS = [3.0, 4.5]      # phoenixp05 has no data above 4.5 for T > 2900 K (see docstring)
-WAV_MIN = 4300.                  # Angstrom -- inside the Neckel (2005) LD
-WAV_MAX = 9000.                  # Angstrom    validity range (4226-11000 A)
-DELTA_LNWAV = 1.35e-3            # ~405 km/s per pixel; matches the finest
-                                 # native CDBS sampling, so we do not invent
-                                 # resolution the underlying models lack.
+##### Wavelength range: the full VLT/X-shooter range.
+WAV_MIN = 3000.                  # Angstrom
+WAV_MAX = 24800.                 # Angstrom
+DELTA_LNWAV = 1.35e-3            # ~405 km/s per pixel; matches the native CDBS
+                                 # sampling, which is uniform at this value from
+                                 # 4300 A all the way out to 25000 A, so we do
+                                 # not invent resolution the models lack.
+                                 # (Below 4300 A the native sampling is coarser,
+                                 # 6.21e-3 / R ~ 161, so the blue end of the UVB
+                                 # arm is interpolated, not truly resolved.)
 N_MU = 16                        # same mu sampling as Atmo_photo_BTSettl7
+
+##### Surface flux -> specific intensity normalization.
+##### True : renormalize per wavelength so the hemispheric integral
+#####        2*pi*Int I(mu)*mu dmu exactly recovers the input surface flux.
+##### False: reproduce Icarus' hardcoded 4/pi^2 factor (what
+#####        Atmo_photo_BTSettl7 uses for the photometric grids). That factor
+#####        is only self-consistent with the limb-darkening law near 5000 A,
+#####        and is wrong by -14% at 3000 A and +19% at 24800 A -- a large
+#####        wavelength-dependent distortion across the X-shooter range.
+EXACT_LD_NORMALIZATION = True
+
+##### X-shooter arm boundaries (Angstrom); used for the coverage report only.
+XSHOOTER_ARMS = [('UVB', 3000., 5595.),
+                 ('VIS', 5595., 10240.),
+                 ('NIR', 10240., 24800.)]
 
 
 def list_temps(fits_dir, temp_min, temp_max):
@@ -141,10 +182,27 @@ def build():
     print("Limb darkening (centre-to-limb ratio): {:.3f} at {:.0f} A, {:.3f} at {:.0f} A.".format(
         mu_factor[0, 0], wav[0], mu_factor[0, -1], wav[-1]))
 
+    ## Surface flux -> specific intensity. For a plane-parallel atmosphere with
+    ## emergent intensity I(mu) = I0*LD(mu), the surface flux is
+    ##     F = 2*pi * Int_0^1 I(mu)*mu dmu = 2*pi*I0 * Int_0^1 LD(mu)*mu dmu,
+    ## so flux conservation requires I0 = F / (2*pi*Int LD(mu)*mu dmu).
+    ld_int = np.trapz(mu_factor*mu[:, None], mu, axis=0)      # (n_wav,)
+    icarus_norm = 4/np.pi**2
+    if EXACT_LD_NORMALIZATION:
+        norm = 1./(2*np.pi*ld_int)
+        print("Using exact per-wavelength flux-conserving normalization.")
+    else:
+        norm = np.full(n_wav, icarus_norm)
+        print("Using Icarus' hardcoded 4/pi^2 normalization (not flux-conserving).")
+    ## Report how far Icarus' hardcoded factor would have been off, so the
+    ## size of the systematic being corrected (or kept) is on the record.
+    recovered = 2*np.pi*icarus_norm*ld_int
+    print("Icarus' 4/pi^2 factor would recover {:.1%} of the surface flux at "
+          "{:.0f} A and {:.1%} at {:.0f} A.".format(
+              recovered[0], wav[0], recovered[-1], wav[-1]))
+
     ## Combine into the (logtemp, logg, mu, wav) grid, in natural-log flux.
-    ## The 4/pi^2 factor matches the convention used by Atmo_photo_BTSettl7
-    ## for the photometric grids, so the two sets are mutually consistent.
-    grid = np.log(flux[:, :, None, :] * mu_factor[None, None, :, :] * 4/np.pi**2)
+    grid = np.log(flux[:, :, None, :] * (mu_factor*norm[None, :])[None, None, :, :])
 
     logtemp = np.log(np.array([t for t, _ in temps]))
     atmo = AtmoGridSpec(
@@ -152,9 +210,11 @@ def build():
         cols=[('logtemp', logtemp), ('logg', logg), ('mu', mu), ('wav', wav)],
         meta={'zp': 0.0,
               'delta_v': DELTA_LNWAV,
-              'units': 'log(F_lambda), erg/s/cm^2/A (times 4/pi^2)',
+              'units': 'log(specific intensity), erg/s/cm^2/A/sr-like',
               'magsys': 'none',
               'source': 'PHOENIX/BT-Settl phoenixp05 (CDBS), resampled uniform in ln(wav)',
+              'normalization': ('exact per-wavelength flux-conserving'
+                                if EXACT_LD_NORMALIZATION else 'Icarus 4/pi^2'),
               'resolution_note': 'R ~ {:.0f}; velocity structure is UNRESOLVED'.format(1./DELTA_LNWAV)})
 
     if os.path.exists(OUT_FLN):
@@ -162,6 +222,10 @@ def build():
     atmo.WriteHDF5(OUT_FLN)
     print("Wrote {} ({:.1f} MB, shape {}).".format(
         OUT_FLN, os.path.getsize(OUT_FLN)/1024.**2, grid.shape))
+    print("X-shooter arm coverage:")
+    for name, lo, hi in XSHOOTER_ARMS:
+        n_in = int(((wav >= lo) & (wav <= hi)).sum())
+        print("  {:3s} {:6.0f}-{:6.0f} A : {:4d} grid points".format(name, lo, hi, n_in))
 
 
 if __name__ == '__main__':

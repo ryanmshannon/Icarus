@@ -44,6 +44,12 @@ atmo_fln = 'atmo_models_J2241-5236.txt'
 ##### Spectroscopic atmosphere grid, used for the model spectrum at the end of
 ##### this script. Built by build_atmo_grid_spec_J2241-5236.py.
 spec_atmo_fln = 'atmo_grid_spec_J2241-5236.h5'
+##### VLT/X-shooter arm boundaries (Angstrom), matching the wavelength range
+##### the spectroscopic grid is built over. Used for the coverage report and
+##### the spectrum plot below.
+XSHOOTER_ARMS = [('UVB', 3000., 5595.),
+                 ('VIS', 5595., 10240.),
+                 ('NIR', 10240., 24800.)]
 ndiv = 5
 
 
@@ -59,8 +65,8 @@ corotation = 1.                        # tidally-locked companion
 filling = 0.66                         # nearly Roche-lobe-filling companion
 gravdark = 0.08                        # gravity darkening coefficient (convective envelope)
 Tnight = 3000.                         # unheated (night-side) base temperature, in K
-Tday = 10000.                          # approximate irradiated (day-side) temperature, in K
-
+#Tday = 10000.                          # approximate irradiated (day-side) temperature, in K
+Tday=5000.
 
 ##### Deriving the mass ratio and the companion's velocity semi-amplitude
 ##### from the pulsar timing solution and the assumed neutron star mass,
@@ -107,6 +113,7 @@ flux_model = fit.Get_flux(par, verbose=True)
 ##### The paper's convention is offset by +0.25 (its max is at 0.75), which is
 ##### what the phase_shift column of data_J2241-5236.txt corrects for.
 spec_phase = 0.5                       # 0.5 = day side / maximum brightness
+spec_phase = 0.25      
 
 print( "Calculating the model spectrum at orbital phase {} (Icarus convention;"
        " = phase {} in the paper's convention).\n".format(spec_phase, (spec_phase+0.25) % 1) )
@@ -123,13 +130,35 @@ fit.Make_surface(par)
 spec_wav = np.asarray(spec_atmo.cols['wav'])          # Angstrom
 spec_flux = fit.star.Flux_doppler(spec_phase, atmo_grid=spec_atmo)
 
+##### UNITS: this is an absolute, physically calibrated flux -- specifically
+##### the flux density the companion would have at a distance of 10 parsec, in
+##### erg/s/cm^2/Angstrom. (Star._Proj returns (a/10pc)^2 and the surface areas
+##### are in units of orbital separation^2, so area*proj = A_phys/(10 pc)^2.)
+##### To place it at the real distance, scale by (10 pc / d)^2, equivalently
+##### apply the same distance modulus that Photometry.Calc_chi2 fits.
+##### Accuracy: the underlying PHOENIX spectra are true surface fluxes
+##### (integral F_lam dlam = sigma T^4), but Icarus converts them to specific
+##### intensity with a hardcoded 4/pi^2 factor that is only exactly consistent
+##### with the limb-darkening law near 5000 A; the recovered surface flux is
+##### off by -5% at 4300 A to +11% at 9000 A.
 print( "Model spectrum: {} points from {:.1f} to {:.1f} A".format(
         spec_wav.size, spec_wav[0], spec_wav[-1]) )
-print( "  flux min/max: {:.4e} / {:.4e}".format(spec_flux.min(), spec_flux.max()) )
+print( "  flux at 10 pc, min/max: {:.4e} / {:.4e} erg/s/cm^2/A".format(
+        spec_flux.min(), spec_flux.max()) )
+
+##### Per-arm summary for VLT/X-shooter.
+print( "  VLT/X-shooter arm coverage (mean flux at 10 pc):" )
+for arm_name, arm_lo, arm_hi in XSHOOTER_ARMS:
+    sel = (spec_wav >= arm_lo) & (spec_wav <= arm_hi)
+    if sel.any():
+        print( "    {:3s} {:6.0f}-{:6.0f} A : {:4d} pts, mean {:.3e} erg/s/cm^2/A".format(
+                arm_name, arm_lo, arm_hi, int(sel.sum()), spec_flux[sel].mean()) )
 print( "  NOTE: the underlying model grid is only R ~ 740 (~400 km/s per"
-       " pixel), so line profiles and the ~350 km/s orbital Doppler shift are"
-       " UNRESOLVED. Treat this as a phase-dependent SED, not a velocity"
-       " diagnostic -- see build_atmo_grid_spec_J2241-5236.py.\n" )
+       " pixel), while X-shooter resolves R ~ 5000-9000. Line profiles,"
+       " equivalent widths and the ~350 km/s orbital Doppler shift are"
+       " therefore UNRESOLVED here: use this to predict continuum shape and"
+       " broad-band count rates, not line diagnostics."
+       " See build_atmo_grid_spec_J2241-5236.py.\n" )
 
 
 ##### Plotting the observed and modelled light curves, phase by phase, and
@@ -137,11 +166,23 @@ print( "  NOTE: the underlying model grid is only R ~ 740 (~400 km/s per"
 if pylab:
     fit.Plot(par)
 
-    pylab.figure()
-    pylab.plot(spec_wav, spec_flux, 'k-', lw=1)
+    pylab.figure(figsize=(10, 5))
+    ##### Shade the three X-shooter arms behind the spectrum.
+    for (arm_name, arm_lo, arm_hi), arm_col in zip(XSHOOTER_ARMS,
+                                                    ['#4c72b0', '#55a868', '#c44e52']):
+        pylab.axvspan(arm_lo, arm_hi, color=arm_col, alpha=0.10)
+        pylab.text(np.sqrt(arm_lo*arm_hi), 0.96, arm_name, color=arm_col,
+                   ha='center', va='top', transform=pylab.gca().get_xaxis_transform())
+    pylab.plot(spec_wav, spec_flux, 'k-', lw=0.8)
+    ##### The SED spans orders of magnitude over the full X-shooter range, so
+    ##### log-log is the readable choice here.
+    pylab.xscale('log')
+    pylab.yscale('log')
+    pylab.xlim(spec_wav[0], spec_wav[-1])
     pylab.xlabel("Wavelength (Angstrom)")
-    pylab.ylabel("Flux (erg/s/cm$^2$/$\\AA$, arbitrary absolute scale)")
-    pylab.title("PSR J2241-5236 companion, model spectrum at phase {}".format(spec_phase))
+    pylab.ylabel("Flux at 10 pc (erg/s/cm$^2$/$\\AA$)")
+    pylab.title("PSR J2241-5236 companion, predicted VLT/X-shooter spectrum "
+                "at orbital phase {}".format(spec_phase))
     pylab.tight_layout()
 
     pylab.show()
