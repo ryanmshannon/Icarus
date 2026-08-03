@@ -45,3 +45,6 @@ Local/*
 *.sublime-workspace
 
 Upload.sh
+
+# Large external reference data (BT-Settl/PHOENIX model spectra grid)
+model_spec/

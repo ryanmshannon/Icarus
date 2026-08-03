@@ -1,0 +1,13 @@
+# Index file for Icarus.Photometry.Photometry -- lists one line per band.
+# Format (9-column, 'preferred'): band  phase_col  mag_col  err_col  phase_shift  calib_err  softening  flag  filename
+#
+# WARNING: the per-band data files referenced below (J2241-5236_g/r/i.txt)
+# contain photometry DIGITIZED BY EYE from Figure 5 of Draghis et al. 2019
+# (arXiv:1908.00992), because that paper does not publish a numeric
+# photometry table for PSR J2241-5236. Treat as placeholder/test data only --
+# see the per-band files for details, and replace with real data before any
+# science use.
+#
+g  0  1  2  0.00  0.03  0.  mag  J2241-5236_g.txt
+r  0  1  2  0.00  0.03  0.  mag  J2241-5236_r.txt
+i  0  1  2  0.00  0.03  0.  mag  J2241-5236_i.txt

@@ -1,0 +1,42 @@
+# Approximate/digitized i-band photometry for PSR J2241-5236
+# DIGITIZED BY EYE from Figure 5 of Draghis, Romani, Filippenko, Brink,
+# Zheng, Halpern & Camilo 2019, ApJ (arXiv:1908.00992), 'Multiband
+# Optical Light Curves of Black-Widow Pulsars'.
+#
+# IMPORTANT: the paper does NOT publish a numeric photometry table for
+# J2241-5236 (checked Table 2/3, main text, and the PDF for a machine-
+# readable table -- none exists; Fig. 5 is the only place the light curve
+# appears, as a plot of g/r/i magnitude vs. orbital phase).
+# These values were read off the plotted points/curve by eye and are NOT
+# the authors' real measurements. Magnitudes are approximate to roughly
+# +/-0.1-0.3 mag depending on phase, and the per-point errors below are
+# rough guesses matching the visual scatter, not the true reported
+# uncertainties.
+# Suitable ONLY for exercising the Icarus fitting pipeline end-to-end,
+# NOT for scientific analysis. Replace with the real data (contact the
+# authors) before drawing any physical conclusions.
+#
+# Col 0: orbital phase (0-1; phase 0.75 = pulsar inferior conjunction /
+#        near companion maximum brightness, per the paper's convention)
+# Col 1: magnitude
+# Col 2: magnitude error
+0.00  22.606  0.105
+0.05  23.039  0.151
+0.10  23.209  0.204
+0.15  23.587  0.253
+0.20  23.683  0.287
+0.25  23.467  0.300
+0.30  23.609  0.287
+0.35  23.545  0.253
+0.40  23.333  0.204
+0.45  23.013  0.151
+0.50  22.539  0.105
+0.55  22.089  0.071
+0.60  21.559  0.051
+0.65  21.080  0.042
+0.70  20.817  0.040
+0.75  20.712  0.040
+0.80  20.791  0.040
+0.85  21.108  0.042
+0.90  21.551  0.051
+0.95  22.072  0.071

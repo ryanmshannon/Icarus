@@ -1,0 +1,10 @@
+# Index file for Icarus.Photometry.Photometry -- lists one line per band.
+# Format: band  filename
+#
+# Built by build_atmo_grid_J2241-5236.py from the PHOENIX/BT-Settl
+# phoenixp05 grid and SVO SDSS g/r/i filter curves. See that script's
+# docstring for the method used and important caveats (metallicity fixed
+# at [M/H]=+0.5, absolute flux zero-point not independently validated).
+g  atmo_grid_J2241-5236_g.h5
+r  atmo_grid_J2241-5236_r.h5
+i  atmo_grid_J2241-5236_i.h5

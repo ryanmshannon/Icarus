@@ -3,7 +3,7 @@
 """
 model_J2241-5236.py
 
-Models the phase-resolved optical spectrum of the irradiated companion
+Models the phase-resolved optical light curve of the irradiated companion
 star of the "black widow" pulsar PSR J2241-5236, using Icarus.
 
 Data and atmosphere grid
@@ -11,10 +11,11 @@ Data and atmosphere grid
 Icarus does not distribute observational data or atmosphere grids. The
 files pointed to by `data_fln` and `atmo_fln` below must be created by
 the user and follow the format documented in the docstring of
-Icarus.Spectroscopy.Spectroscopy:
-    - `data_fln` lists, for each phase-resolved spectrum, the data file,
-      the wavelength/flux/flux-error column indices, the orbital phase
-      and the barycentric velocity correction.
+Icarus.Photometry.Photometry:
+    - `data_fln` is an index file listing, for each photometric band, the
+      band name, the phase/magnitude/magnitude-error column ids, the
+      phase shift, the band calibration error, and the per-band data
+      file (which itself holds the phase-resolved photometry).
     - `atmo_fln` points to the atmosphere grid (e.g. a BT-Settl grid)
       appropriate for a strongly irradiated, very-low-mass companion.
 
@@ -77,24 +78,24 @@ print( "Companion velocity semi-amplitude K1 ~ {:.1f} km/s".format(k1/1e3) )
 tirr = (Tday**4 - Tnight**4)**0.25
 
 
-##### Full parameter vector for Icarus.Spectroscopy.Spectroscopy.Get_flux:
+##### Full parameter vector for Icarus.Photometry.Photometry.Get_flux:
 ##### [q, porb, incl, k1, corotation, filling, gravdark, Tnight, tirr]
 par = np.r_[q, porb, incl, k1, corotation, filling, gravdark, Tnight, tirr]
 
 
-##### Loading the data into an Icarus.Spectroscopy object (failure to do
-##### so is likely due to missing data/atmosphere model files -- see the
+##### Loading the data into an Icarus.Photometry object (failure to do so
+##### is likely due to missing data/atmosphere model files -- see the
 ##### module docstring above).
-print( "Loading the data into an Icarus.Spectroscopy object.\n" )
-fit = Icarus.Spectroscopy.Spectroscopy(data_fln, ndiv, atmo_fln)
+print( "Loading the data into an Icarus.Photometry object.\n" )
+fit = Icarus.Photometry.Photometry(atmo_fln, data_fln, ndiv)
 
 
-##### Calculating the model spectra at the observed orbital phases.
-print( "Calculating the model spectrum of the companion star.\n" )
+##### Calculating the model light curves at the observed orbital phases.
+print( "Calculating the model light curves of the companion star.\n" )
 flux_model = fit.Get_flux(par, verbose=True)
 
 
-##### Plotting the observed and modelled spectra, phase by phase.
+##### Plotting the observed and modelled light curves, phase by phase.
 if pylab:
-    fit.Plot(par=par, flux_model=flux_model)
+    fit.Plot(par)
     pylab.show()
