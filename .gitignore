@@ -54,3 +54,15 @@ model_spec/
 # The much smaller photometric grids (atmo_grid_J2241-5236_{g,r,i}.h5) are
 # tracked, since they are only ~50 KB each.
 atmo_grid_spec_J2241-5236.h5
+
+# Large regenerable build products of the high-resolution spectroscopic grid.
+# Rebuild with `python build_atmo_grid_spec_J2241-5236.py --source phoenix-hires`
+# (the _starfish.h5 file is the intermediate convolved grid, kept so the grid can
+# be rebuilt at a different resolution without re-downloading).
+atmo_grid_spec_hires_J2241-5236.h5
+atmo_grid_spec_hires_J2241-5236_starfish.h5
+build_hires.log
+
+# Large external reference data: the raw Husser (2013) PHOENIX HiRes library,
+# fetched by download_phoenix.py (~1.7 GB for the default selection).
+model_spec_hires/
