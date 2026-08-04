@@ -113,7 +113,7 @@ flux_model = fit.Get_flux(par, verbose=True)
 ##### The paper's convention is offset by +0.25 (its max is at 0.75), which is
 ##### what the phase_shift column of data_J2241-5236.txt corrects for.
 spec_phase = 0.5                       # 0.5 = day side / maximum brightness
-spec_phase = 0.25      
+#spec_phase = 0.25      
 
 print( "Calculating the model spectrum at orbital phase {} (Icarus convention;"
        " = phase {} in the paper's convention).\n".format(spec_phase, (spec_phase+0.25) % 1) )
@@ -180,7 +180,7 @@ if pylab:
     pylab.yscale('log')
     pylab.xlim(spec_wav[0], spec_wav[-1])
     pylab.xlabel("Wavelength (Angstrom)")
-    pylab.ylabel("Flux at 10 pc (erg/s/cm$^2$/$\\AA$)")
+    pylab.ylabel("Flux (erg/s/cm$^2$/$\\AA$)")
     pylab.title("PSR J2241-5236 companion, predicted VLT/X-shooter spectrum "
                 "at orbital phase {}".format(spec_phase))
     pylab.tight_layout()
