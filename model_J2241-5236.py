@@ -34,6 +34,10 @@ Usage
     python model_J2241-5236.py --hires --spec-phase 0.75 \\
         --plot-range 6540 6590 --save-spec spec_halpha_p075.txt
 
+    ## As it would actually be observed: placed at the source's distance and
+    ## reddened, rather than left at Icarus' native 10 pc:
+    python model_J2241-5236.py --hires --distance 1.0 --av 0.1
+
 System parameters
 ------------------
 The pulsar spin/orbital timing solution is from the discovery paper:
@@ -75,6 +79,20 @@ XSHOOTER_ARMS = [('UVB', 3000., 5595.),
                  ('NIR', 10240., 24800.)]
 ndiv = 5
 
+##### Distance and extinction to PSR J2241-5236, used only to place the model
+##### spectrum on an observable flux scale (--distance/--dm/--av). Icarus itself
+##### works at 10 pc: Star._Proj hardcodes that, so every flux the model returns
+##### is an absolute one and the distance is applied here, afterwards.
+#####
+##### IMPORTANT: set these to the values you intend to use and cite. They are
+##### NOT constrained by anything in this repository, and the light-curve fit
+##### does not measure them either -- Photometry.Plot fits a free offset per
+##### band, which absorbs distance, extinction and any grid zero-point error
+##### into one number per band (see the note near the Get_flux call below).
+DISTANCE_KPC = 1.1                    # None -> must be given with --distance/--dm
+AV = 0.05                               # V-band extinction, magnitudes
+RV = 3.1                               # A_V/E(B-V); 3.1 is the standard diffuse-ISM value
+
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
@@ -94,10 +112,38 @@ def parse_args(argv=None):
                    metavar=('MIN', 'MAX'),
                    help="Wavelength range of the spectrum plot, in Angstrom. Default: "
                         "the whole grid.")
+    d = p.add_argument_group('distance and extinction of the model spectrum')
+    d.add_argument('--distance', type=float, default=DISTANCE_KPC, metavar='KPC',
+                   help="Distance in kpc. Without this (and without --dm) the "
+                        "spectrum is left at Icarus' native 10 pc, i.e. absolute.")
+    d.add_argument('--dm', type=float, default=None, metavar='MAG',
+                   help="Distance modulus, as an alternative to --distance.")
+    d.add_argument('--av', type=float, default=AV, metavar='MAG',
+                   help="V-band extinction applied to the spectrum, using the "
+                        "O'Donnell (1994) law from Icarus.Utils.Flux.Extinction.")
+    d.add_argument('--rv', type=float, default=RV, metavar='RATIO',
+                   help="A_V/E(B-V) for the extinction law.")
+    d.add_argument('--cardelli', action='store_true',
+                   help="Use the Cardelli et al. (1989) extinction law instead of "
+                        "O'Donnell (1994).")
+
     p.add_argument('--save-spec', default=None, metavar='PATH',
                    help="Also write the model spectrum as two columns, wavelength "
-                        "(Angstrom) and flux at 10 pc (erg/s/cm^2/A).")
-    return p.parse_args(argv)
+                        "(Angstrom) and flux (erg/s/cm^2/A) at whatever distance "
+                        "the spectrum was placed at.")
+    args = p.parse_args(argv)
+    if args.dm is not None and args.distance is not None:
+        p.error("--distance and --dm are mutually exclusive")
+    if args.dm is None and args.distance is not None:
+        if args.distance <= 0:
+            p.error("--distance must be positive")
+        ##### Distance modulus WITHOUT the extinction term: the extinction is
+        ##### applied per wavelength below, so folding it in here as well would
+        ##### double-count it.
+        args.dm = Icarus.Utils.Flux.Distance_to_distance_modulus(args.distance)
+    elif args.dm is not None:
+        args.distance = Icarus.Utils.Flux.Distance_modulus_to_distance(args.dm)
+    return args
 
 
 args = parse_args()
@@ -200,8 +246,12 @@ spec_flux = fit.star.Flux_doppler(spec_phase, atmo_grid=spec_atmo)
 ##### the flux density the companion would have at a distance of 10 parsec, in
 ##### erg/s/cm^2/Angstrom. (Star._Proj returns (a/10pc)^2 and the surface areas
 ##### are in units of orbital separation^2, so area*proj = A_phys/(10 pc)^2.)
-##### To place it at the real distance, scale by (10 pc / d)^2, equivalently
-##### apply the same distance modulus that Photometry.Calc_chi2 fits.
+##### --distance/--dm below places it at the real distance by scaling by
+##### (10 pc / d)^2, and --av reddens it; without them the spectrum stays
+##### absolute. Note that the light-curve fit does NOT independently measure
+##### either quantity: Photometry.Plot fits one free offset per band, which
+##### absorbs distance, extinction and grid zero-point together, so the
+##### distance used here is an input you must justify, not a fit result.
 ##### Accuracy: the underlying PHOENIX spectra are true surface fluxes
 ##### (integral F_lam dlam = sigma T^4). How faithfully the grid turns those
 ##### into the specific intensities Icarus integrates depends on how it was
@@ -216,8 +266,66 @@ print( "Model spectrum: {} points from {:.1f} to {:.1f} A".format(
 print( "  flux at 10 pc, min/max: {:.4e} / {:.4e} erg/s/cm^2/A".format(
         spec_flux.min(), spec_flux.max()) )
 
+##### Place the spectrum at the real distance and redden it. Both are pure
+##### multiplicative factors applied after the surface integration, so nothing
+##### about the model itself changes -- only the scale it is reported on.
+spec_where = "10 pc"
+if args.dm is not None:
+    spec_flux = spec_flux * 10**(-0.4*args.dm)
+    spec_where = "{:.3g} kpc".format(args.distance)
+    print( "  scaled to d = {:.4g} kpc (DM = {:.3f} mag): min/max {:.4e} /"
+           " {:.4e} erg/s/cm^2/A".format(args.distance, args.dm,
+                                         spec_flux.min(), spec_flux.max()) )
+if args.av:
+    ##### Extinction expects microns and returns A_lambda/A_V.
+    a_lambda = args.av * Icarus.Utils.Flux.Extinction(spec_wav*1e-4, Rv=args.rv,
+                                                      cardelli=args.cardelli)
+    if not np.isfinite(a_lambda).all():
+        print( "  WARNING: the extinction law is undefined over part of this"
+               " wavelength range ({} points); those points are left"
+               " unreddened.".format(int((~np.isfinite(a_lambda)).sum())) )
+        a_lambda = np.nan_to_num(a_lambda)
+    spec_flux = spec_flux * 10**(-0.4*a_lambda)
+    spec_where += ", A_V = {:.2f}".format(args.av)
+    print( "  reddened with A_V = {:.3f} mag, Rv = {:.2f} ({}): A_lambda ="
+           " {:.3f} at {:.0f} A to {:.3f} at {:.0f} A; min/max {:.4e} /"
+           " {:.4e} erg/s/cm^2/A".format(
+                args.av, args.rv, 'Cardelli 1989' if args.cardelli else "O'Donnell 1994",
+                a_lambda[0], spec_wav[0], a_lambda[-1], spec_wav[-1],
+                spec_flux.min(), spec_flux.max()) )
+elif args.dm is None:
+    print( "  NOTE: left at 10 pc (absolute). Pass --distance KPC (or --dm) and"
+           " --av to put the spectrum on an observable flux scale." )
+
+##### CROSS-CHECK OF THE ABSOLUTE SCALE.
+##### The spectrum is only as absolute as the model's flux zero-point, and the
+##### photometry can test that: the offsets Photometry fits are what the DATA
+##### require on top of the 10 pc model, whereas the distance and extinction
+##### assumed here PREDICT dm + ext*A_V. The two should agree. Any residual is
+##### how wrong the absolute flux scale is -- a mixture of the grid zero-point,
+##### the assumed Tnight/tirr/filling and the distance itself -- and it applies
+##### to the spectrum just as much as to the photometry, since both come from
+##### the same PHOENIX library and the same surface integration. Multiply any
+##### predicted count rate (and divide any predicted RV precision) by the flux
+##### factor printed below to carry the systematic through.
+if args.dm is not None:
+    chi2_off, extras_off = fit.Calc_chi2(par, do_offset=True, full_output=True)
+    offset_fitted = np.asarray(extras_off['offset'])
+    offset_predicted = args.dm + np.asarray(fit.data['ext'])*args.av
+    resid = offset_fitted - offset_predicted
+    print( "  absolute-scale cross-check against the photometry"
+           " (fitted offset vs dm + ext*A_V):" )
+    for band, o_fit, o_pred, r in zip(fit.data['id'], offset_fitted,
+                                      offset_predicted, resid):
+        print( "    {:3s}: fitted {:+7.3f}, predicted {:+7.3f}, residual {:+6.3f} mag"
+               " (model too bright by x{:.2f})".format(
+                    band, o_fit, o_pred, r, 10**(0.4*r)) )
+    print( "    mean residual {:+.3f} +/- {:.3f} mag -> the model's absolute flux is"
+           " off by a factor of {:.2f}. This is NOT corrected in the spectrum"
+           " above.".format(resid.mean(), resid.std(), 10**(0.4*resid.mean())) )
+
 ##### Per-arm summary for VLT/X-shooter.
-print( "  VLT/X-shooter arm coverage (mean flux at 10 pc):" )
+print( "  VLT/X-shooter arm coverage (mean flux at {}):".format(spec_where) )
 for arm_name, arm_lo, arm_hi in XSHOOTER_ARMS:
     sel = (spec_wav >= arm_lo) & (spec_wav <= arm_hi)
     if sel.any():
@@ -244,9 +352,9 @@ else:
 
 if args.save_spec:
     np.savetxt(args.save_spec, np.c_[spec_wav, spec_flux],
-               header="wavelength (A)  flux at 10 pc (erg/s/cm^2/A)\n"
+               header="wavelength (A)  flux at {} (erg/s/cm^2/A)\n"
                       "phase {} (Icarus convention), grid {}".format(
-                          spec_phase, spec_atmo_fln))
+                          spec_where, spec_phase, spec_atmo_fln))
     print( "  wrote the spectrum to {}\n".format(args.save_spec) )
 
 
@@ -280,9 +388,9 @@ if pylab:
         pylab.ylim(0.95*spec_flux[sel].min(), 1.05*spec_flux[sel].max())
     pylab.xlabel("Wavelength (Angstrom)")
     pylab.ylabel("Flux (erg/s/cm$^2$/$\\AA$)")
-    pylab.title("PSR J2241-5236 companion, predicted VLT/X-shooter spectrum "
-                "at orbital phase {} ({:.1f} km/s/pixel)".format(
-                    spec_phase, spec_delta_v))
+    pylab.title("PSR J2241-5236 companion, predicted VLT/X-shooter spectrum at "
+                "orbital phase {} ({:.1f} km/s/pixel, {})".format(
+                    spec_phase, spec_delta_v, spec_where))
     pylab.tight_layout()
 
     pylab.show()
